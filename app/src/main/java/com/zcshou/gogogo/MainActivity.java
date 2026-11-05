@@ -1294,7 +1294,7 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
     }
 
     private void checkUpdateVersion(boolean result) {
-        String mapApiUrl = "https://api.github.com/repos/zcshou/gogogo/releases/latest";
+        String mapApiUrl = "https://api.github.com/repos/xieyinch/location-simulator/releases/latest";
 
         okhttp3.Request request = new okhttp3.Request.Builder().url(mapApiUrl).get().build();
         final Call call = mOkHttpClient.newCall(request);
