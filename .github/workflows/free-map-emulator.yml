@@ -23,6 +23,7 @@ jobs:
         run: |
           printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
           python3 -c "from pathlib import Path; p=Path('app/build.gradle'); s=p.read_text(); s=s.replace(r'..\\\\keystore\\\\GoGoGo.jks','../keystore/GoGoGo.jks'); s=s.replace('abiFilters \"arm64-v8a\"','abiFilters \"arm64-v8a\", \"x86_64\"'); p.write_text(s)"
+          python3 -c "from pathlib import Path; p=Path('app/src/main/AndroidManifest.xml'); s=p.read_text(); s=s.replace('android:name=\".FreeSimulationService\" android:exported=\"false\"','android:name=\".FreeSimulationService\" android:exported=\"true\"'); p.write_text(s)"
           bash gradlew assembleDebug
       - uses: reactivecircus/android-emulator-runner@v2
         with:
