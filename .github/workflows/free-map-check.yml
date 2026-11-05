@@ -1,0 +1,26 @@
+name: Free map build check
+on:
+  push:
+    branches: [codex/free-map-routes]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configure build
+        run: |
+          printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
+          python3 -c "from pathlib import Path; p=Path('app/build.gradle'); s=p.read_text(); p.write_text(s.replace(r'..\\\\keystore\\\\GoGoGo.jks', '../keystore/GoGoGo.jks'))"
+      - run: bash gradlew assembleDebug testDebugUnitTest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: free-map-test-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
