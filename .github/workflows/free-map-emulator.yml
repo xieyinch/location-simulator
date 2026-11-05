@@ -1,0 +1,40 @@
+name: Free map emulator smoke test
+on:
+  push:
+    branches: [codex/free-map-routes]
+    paths: [.github/workflows/free-map-emulator.yml]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build emulator APK
+        run: |
+          printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
+          python3 -c "from pathlib import Path; p=Path('app/build.gradle'); s=p.read_text(); s=s.replace(r'..\\\\keystore\\\\GoGoGo.jks','../keystore/GoGoGo.jks'); s=s.replace('abiFilters \"arm64-v8a\"','abiFilters \"arm64-v8a\", \"x86_64\"'); p.write_text(s)"
+          bash gradlew assembleDebug
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          disable-animations: true
+          script: |
+            adb install -r app/build/outputs/apk/debug/*.apk
+            adb shell appops set com.zcshou.gogogo android:mock_location allow
+            adb logcat -c
+            adb shell am start -W -n com.zcshou.gogogo/.FreeMapActivity
+            sleep 12
+            adb shell pidof com.zcshou.gogogo
+            adb logcat -d -s AndroidRuntime:E > runtime.log
+            if grep -q 'FATAL EXCEPTION' runtime.log; then cat runtime.log; exit 1; fi
