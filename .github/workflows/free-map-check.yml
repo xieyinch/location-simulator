@@ -18,7 +18,7 @@ jobs:
         run: |
           printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
           python3 -c "from pathlib import Path; p=Path('app/build.gradle'); s=p.read_text(); p.write_text(s.replace(r'..\\\\keystore\\\\GoGoGo.jks', '../keystore/GoGoGo.jks'))"
-      - run: bash gradlew assembleDebug
+      - run: bash gradlew assembleDebug testDebugUnitTest
       - uses: actions/upload-artifact@v4
         with:
           name: free-map-test-apk

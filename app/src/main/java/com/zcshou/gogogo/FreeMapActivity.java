@@ -32,6 +32,7 @@ public class FreeMapActivity extends AppCompatActivity {
     private android.content.SharedPreferences prefs;
     private static final String STYLE="https://tiles.openfreemap.org/styles/liberty";
     @Override public void onCreate(Bundle saved){super.onCreate(saved);MapLibre.getInstance(this);prefs=getSharedPreferences("free_map",MODE_PRIVATE);migrateFavorites();
+        if(saved!=null){drawing=saved.getBoolean("drawing");try{JSONArray a=new JSONArray(saved.getString("route","[]"));for(int i=0;i<a.length();i++){JSONObject p=a.getJSONObject(i);route.add(new LatLng(p.getDouble("lat"),p.getDouble("lon")));}String value=saved.getString("selected");if(value!=null){JSONObject p=new JSONObject(value);selected=new LatLng(p.getDouble("lat"),p.getDouble("lon"));}}catch(JSONException ignored){}}
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         TextView title=new TextView(this);title.setText("位置模拟 · OpenStreetMap");title.setTextSize(20);title.setTextColor(Color.WHITE);title.setBackgroundColor(0xff008577);title.setPadding(16,18,16,18);root.addView(title);
         info=new TextView(this);info.setText("点击地图选点；路线模式下依次点击添加节点");info.setPadding(12,8,12,8);root.addView(info);
@@ -43,6 +44,7 @@ public class FreeMapActivity extends AppCompatActivity {
         addButton(bar,"撤销节点",()->{if(!route.isEmpty()){route.remove(route.size()-1);redraw();}});
         addButton(bar,"保存路线",this::saveRoute);addButton(bar,"路线列表",this::routes);addButton(bar,"开始路线",this::playRoute);
         addButton(bar,"停止模拟",()->{startService(new Intent(this,FreeSimulationService.class).setAction(FreeSimulationService.ACTION_STOP));toast("已请求停止模拟");});
+        addButton(bar,"悬浮摇杆",()->{if(!Settings.canDrawOverlays(this)){new AlertDialog.Builder(this).setMessage("请先授权显示悬浮窗，再返回点击悬浮摇杆。") .setNegativeButton("取消",null).setPositiveButton("授权",(d,w)->startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())))).show();return;}try{startForegroundService(new Intent(this,FreeSimulationService.class).setAction(FreeSimulationService.ACTION_SHOW_CONTROLS));}catch(Exception e){toast("请先启动位置模拟");}});
         addButton(bar,"更新",()->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/xieyinch/location-simulator/releases"))));
         mapView.getMapAsync(m->{map=m;map.setStyle(STYLE,style->{map.moveCamera(CameraUpdateFactory.newLatLngZoom(new LatLng(34.23,108.94),12));redraw();});
             map.addOnMapClickListener(p->{selected=p;if(drawing)route.add(p);redraw();info.setText(String.format(java.util.Locale.US,"%.6f, %.6f%s",p.getLatitude(),p.getLongitude(),drawing?"  ·  节点 "+route.size():""));return true;});});
@@ -74,5 +76,5 @@ public class FreeMapActivity extends AppCompatActivity {
     @Override protected void onStart(){super.onStart();mapView.onStart();} @Override protected void onResume(){super.onResume();mapView.onResume();}
     @Override protected void onPause(){mapView.onPause();super.onPause();} @Override protected void onStop(){mapView.onStop();super.onStop();}
     @Override protected void onDestroy(){if(searchCall!=null)searchCall.cancel();mapView.onDestroy();super.onDestroy();}
-    @Override public void onLowMemory(){super.onLowMemory();mapView.onLowMemory();} @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);mapView.onSaveInstanceState(out);}
+    @Override public void onLowMemory(){super.onLowMemory();mapView.onLowMemory();} @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);out.putBoolean("drawing",drawing);out.putString("route",routeJson().toString());if(selected!=null)try{out.putString("selected",point(selected).toString());}catch(JSONException ignored){}mapView.onSaveInstanceState(out);}
 }
