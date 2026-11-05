@@ -1,9 +1,9 @@
 # location-simulator
 
-基于 [ZCShou/GoGoGo](https://github.com/ZCShou/GoGoGo) 公开源码进行二次开发，基线提交为 96139eee5e2e174901464d42eeaf67b00f9229f4。源代码中的应用版本为 1.12.3，并非 VirtGO 2.5.2。
+基于 [ZCShou/GoGoGo](https://github.com/ZCShou/GoGoGo) 公开源码二次开发，基线提交为 96139eee5e2e174901464d42eeaf67b00f9229f4，源代码应用版本为 1.12.3。
 
-当前包含位置收藏及搜索范围的初步修改；尚未完成构建、百度地图搜索或真机定位验证。搜索故障原因尚待排查。
+主地图搜索使用 [Photon](https://github.com/komoot/photon) 公共服务，地点数据来自 [OpenStreetMap 及其贡献者](https://www.openstreetmap.org/copyright)。按键盘搜索键提交关键词；公开服务可能限流，地点覆盖和网络可用性因地区而异。收藏功能支持保存选中位置、点击传送和长按删除。上述修改尚需真机验证。
 
-构建需配置百度地图开发者 Key 与安全码，匹配应用包名和签名；请通过本地配置或 GitHub Secrets 保存，不要提交密钥。
+当前底图、悬浮窗地图和相关定位组件仍使用百度地图 SDK，需要符合包名和签名要求的百度 Key；项目还未实现完全免 Key。不要将密钥提交到仓库。编译检查中的占位符不能用于实际地图服务。
 
-原项目说明见 [UPSTREAM_README.md](UPSTREAM_README.md)，本项目遵循 [GPL-3.0-only](LICENSE)。
+原项目说明见 [UPSTREAM_README.md](UPSTREAM_README.md)，遵循 [GPL-3.0-only](LICENSE)。
