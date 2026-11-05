@@ -1,0 +1,126 @@
+diff --git a/app/src/main/java/com/zcshou/gogogo/MainActivity.java b/app/src/main/java/com/zcshou/gogogo/MainActivity.java
+index 0764110..62c20cf 100644
+--- a/app/src/main/java/com/zcshou/gogogo/MainActivity.java
++++ b/app/src/main/java/com/zcshou/gogogo/MainActivity.java
+@@ -277,6 +277,8 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
+     public boolean onCreateOptionsMenu(final Menu menu) {
+         // Inflate the menu; this adds items to the action bar if it is present.
+         getMenuInflater().inflate(R.menu.menu_main, menu);
++        menu.findItem(R.id.action_favorites).setOnMenuItemClickListener(item -> { showFavorites(); return true; });
++        menu.findItem(R.id.action_add_favorite).setOnMenuItemClickListener(item -> { addFavorite(); return true; });
+         //找到searchView
+         searchItem = menu.findItem(R.id.action_search);
+         searchItem.setOnActionExpandListener(new  MenuItem.OnActionExpandListener() {
+@@ -328,7 +330,7 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
+                 try {
+                     mSuggestionSearch.requestSuggestion((new SuggestionSearchOption())
+                             .keyword(query)
+-                            .city(mCurrentCity)
++                            .city("全国")
+                     );
+                     //搜索历史 插表参数
+                     ContentValues contentValues = new ContentValues();
+@@ -358,7 +360,7 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
+                     try {
+                         mSuggestionSearch.requestSuggestion((new SuggestionSearchOption())
+                                 .keyword(newText)
+-                                .city(mCurrentCity)
++                                .city("全国")
+                         );
+                     } catch (Exception e) {
+                         GoUtils.DisplayToast(MainActivity.this, getResources().getString(R.string.app_error_search));
+@@ -735,6 +737,80 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
+         });
+     }
+ 
++    private static final String FAVORITES_KEY = "favorite_locations";
++
++    private JSONArray readFavorites() {
++        try {
++            return new JSONArray(getPreferences(MODE_PRIVATE).getString(FAVORITES_KEY, "[]"));
++        } catch (JSONException e) {
++            XLog.e("读取收藏失败", e);
++            return new JSONArray();
++        }
++    }
++
++    private void addFavorite() {
++        if (mMarkLatLngMap == null) {
++            GoUtils.DisplayToast(this, "请先在地图上选择位置");
++            return;
++        }
++        final double lat = mMarkLatLngMap.latitude;
++        final double lng = mMarkLatLngMap.longitude;
++        EditText name = new EditText(this);
++        name.setSingleLine(true);
++        name.setHint("输入收藏名称");
++        new AlertDialog.Builder(this).setTitle("收藏当前位置").setView(name)
++                .setNegativeButton("取消", null)
++                .setPositiveButton("保存", (dialog, which) -> {
++                    String title = name.getText().toString().trim();
++                    if (title.isEmpty()) title = String.format(java.util.Locale.US, "%.6f, %.6f", lat, lng);
++                    try {
++                        JSONArray items = readFavorites();
++                        JSONObject item = new JSONObject();
++                        item.put("name", title);
++                        item.put("lat", lat);
++                        item.put("lng", lng);
++                        items.put(item);
++                        boolean saved = getPreferences(MODE_PRIVATE).edit().putString(FAVORITES_KEY, items.toString()).commit();
++                        GoUtils.DisplayToast(this, saved ? "已添加收藏" : "收藏保存失败");
++                    } catch (JSONException e) {
++                        GoUtils.DisplayToast(this, "收藏保存失败");
++                    }
++                }).show();
++    }
++
++    private void showFavorites() {
++        JSONArray items = readFavorites();
++        if (items.length() == 0) {
++            GoUtils.DisplayToast(this, "暂无收藏，请先选择位置并添加收藏");
++            return;
++        }
++        String[] names = new String[items.length()];
++        for (int i = 0; i < items.length(); i++) names[i] = items.optJSONObject(i).optString("name", "未命名位置");
++        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("收藏位置（点击传送，长按删除）")
++                .setItems(names, (d, index) -> {
++                    JSONObject item = items.optJSONObject(index);
++                    if (item == null || !item.has("lat") || !item.has("lng")) return;
++                    mMarkName = item.optString("name");
++                    mMarkLatLngMap = new LatLng(item.optDouble("lat"), item.optDouble("lng"));
++                    mBaiduMap.setMapStatus(MapStatusUpdateFactory.newLatLng(mMarkLatLngMap));
++                    markMap();
++                    doGoLocation(mButtonStart);
++                }).setNegativeButton("关闭", null).create();
++        dialog.setOnShowListener(d -> dialog.getListView().setOnItemLongClickListener((parent, view, index, id) -> {
++            new AlertDialog.Builder(this).setMessage("删除收藏：" + names[index] + "？")
++                    .setNegativeButton("取消", null).setPositiveButton("删除", (ignored, which) -> {
++                        JSONArray updated = new JSONArray();
++                        for (int i = 0; i < items.length(); i++) if (i != index) updated.put(items.opt(i));
++                        if (getPreferences(MODE_PRIVATE).edit().putString(FAVORITES_KEY, updated.toString()).commit()) {
++                            dialog.dismiss();
++                            GoUtils.DisplayToast(this, "已删除收藏");
++                        } else GoUtils.DisplayToast(this, "删除失败");
++                    }).show();
++            return true;
++        }));
++        dialog.show();
++    }
++
+     //标定选择的位置
+     private void markMap() {
+         if (mMarkLatLngMap != null) {
+diff --git a/app/src/main/res/menu/menu_main.xml b/app/src/main/res/menu/menu_main.xml
+index 4f23e2d..51bf40a 100644
+--- a/app/src/main/res/menu/menu_main.xml
++++ b/app/src/main/res/menu/menu_main.xml
+@@ -2,6 +2,9 @@
+ <menu xmlns:android="http://schemas.android.com/apk/res/android"
+     xmlns:app="http://schemas.android.com/apk/res-auto">
+ 
++    <item android:id="@+id/action_add_favorite" android:title="收藏选中位置" app:showAsAction="never" />
++    <item android:id="@+id/action_favorites" android:title="我的收藏" app:showAsAction="never" />
++
+     <item
+         android:id="@+id/action_search"
+         android:icon="@drawable/ic_search"
