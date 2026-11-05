@@ -274,7 +274,7 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
 
         initUpdateVersion();
 
-        checkUpdateVersion(false);
+        // 检查更新由用户从菜单打开本项目发行页。
     }
 
     @Override
@@ -487,7 +487,7 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
                     }
                 }
             } else if (id == R.id.nav_update) {
-                checkUpdateVersion(true);
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/xieyinch/location-simulator/releases")));
             } else if (id == R.id.nav_feedback) {
                 File file = new File(getExternalFilesDir("Logs"), GoApplication.LOG_FILE_NAME);
                 ShareUtils.shareFile(this, file, item.getTitle().toString());
