@@ -48,7 +48,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
-        android:name=".GoApplication"
+        android:name="android.app.Application"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:launchMode="singleInstance"
@@ -83,7 +83,7 @@
         </provider>
 
         <activity
-            android:name=".WelcomeActivity"
+            android:name=".FreeMapActivity"
             android:exported="true"
             android:theme="@style/AppTheme.NoActionBar"
             >
@@ -92,6 +92,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service android:name=".FreeSimulationService" android:exported="false" />
 
         <activity
             android:name=".MainActivity"
