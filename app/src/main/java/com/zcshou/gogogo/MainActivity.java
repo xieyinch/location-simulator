@@ -119,6 +119,8 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
     public static final String POI_LATITUDE = "POI_LATITUDE";
 
     private OkHttpClient mOkHttpClient;
+    private Call photonCall;
+    private int photonRequestId;
     private SharedPreferences sharedPreferences;
 
     /*============================== 主界面地图 相关 ==============================*/
@@ -158,6 +160,67 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
     private LinearLayout mHistoryLayout;
     private MenuItem searchItem;
     private SuggestionSearch mSuggestionSearch;
+    private void searchPhoton(String query) {
+        String term = query == null ? "" : query.trim();
+        if (term.isEmpty()) return;
+        if (photonCall != null) photonCall.cancel();
+        final int requestId = ++photonRequestId;
+        okhttp3.HttpUrl url = okhttp3.HttpUrl.parse("https://photon.komoot.io/api/")
+                .newBuilder().addQueryParameter("q", term).addQueryParameter("limit", "20").build();
+        photonCall = mOkHttpClient.newCall(new okhttp3.Request.Builder().url(url)
+                .header("User-Agent", "LocationSimulator/1.0 (Android; OpenStreetMap search)").build());
+        photonCall.enqueue(new Callback() {
+            @Override public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                if (call.isCanceled()) return;
+                runOnUiThread(() -> {
+                    if (!isFinishing() && requestId == photonRequestId)
+                        GoUtils.DisplayToast(MainActivity.this, "搜索服务连接失败，请检查网络后重试");
+                });
+            }
+            @Override public void onResponse(@NonNull Call call, @NonNull Response response) {
+                try (Response res = response) {
+                    if (!res.isSuccessful() || res.body() == null) throw new IOException("HTTP " + res.code());
+                    JSONArray features = new JSONObject(res.body().string()).getJSONArray("features");
+                    List<Map<String, Object>> data = new ArrayList<>();
+                    for (int i = 0; i < features.length(); i++) {
+                        JSONObject feature = features.optJSONObject(i);
+                        if (feature == null) continue;
+                        JSONObject geometry = feature.optJSONObject("geometry");
+                        JSONObject properties = feature.optJSONObject("properties");
+                        JSONArray coords = geometry == null ? null : geometry.optJSONArray("coordinates");
+                        if (properties == null || coords == null || coords.length() < 2) continue;
+                        double lng = coords.optDouble(0, Double.NaN), lat = coords.optDouble(1, Double.NaN);
+                        if (!Double.isFinite(lng) || !Double.isFinite(lat) || Math.abs(lng) > 180 || Math.abs(lat) > 90) continue;
+                        double[] bd = MapUtils.wgs2bd09(lng, lat);
+                        Map<String, Object> item = new HashMap<>();
+                        item.put(POI_NAME, properties.optString("name", term));
+                        item.put(POI_ADDRESS, properties.optString("city", "") + " " + properties.optString("state", "") + " " + properties.optString("country", ""));
+                        item.put(POI_LONGITUDE, String.valueOf(bd[0]));
+                        item.put(POI_LATITUDE, String.valueOf(bd[1]));
+                        data.add(item);
+                    }
+                    runOnUiThread(() -> {
+                        if (isFinishing() || requestId != photonRequestId) return;
+                        if (data.isEmpty()) {
+                            mSearchLayout.setVisibility(View.INVISIBLE);
+                            GoUtils.DisplayToast(MainActivity.this, "未找到结果，可尝试其他关键词");
+                            return;
+                        }
+                        mSearchList.setAdapter(new SimpleAdapter(MainActivity.this, data, R.layout.search_poi_item,
+                                new String[]{POI_NAME, POI_ADDRESS, POI_LONGITUDE, POI_LATITUDE},
+                                new int[]{R.id.poi_name, R.id.poi_address, R.id.poi_longitude, R.id.poi_latitude}));
+                        mSearchLayout.setVisibility(View.VISIBLE);
+                    });
+                } catch (Exception e) {
+                    runOnUiThread(() -> {
+                        if (!isFinishing() && requestId == photonRequestId)
+                            GoUtils.DisplayToast(MainActivity.this, "搜索服务暂时不可用，请稍后重试");
+                    });
+                }
+            }
+        });
+    }
+
     /*============================== 更新 相关 ==============================*/
     private DownloadManager mDownloadManager = null;
     private long mDownloadId;
@@ -259,6 +322,7 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
         mMapView.onDestroy();
 
         //poi search destroy
+        if (photonCall != null) photonCall.cancel();
         mSuggestionSearch.destroy();
 
         //close db
@@ -328,10 +392,7 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
             @Override
             public boolean onQueryTextSubmit(String query) {
                 try {
-                    mSuggestionSearch.requestSuggestion((new SuggestionSearchOption())
-                            .keyword(query)
-                            .city("全国")
-                    );
+                    searchPhoton(query);
                     //搜索历史 插表参数
                     ContentValues contentValues = new ContentValues();
                     contentValues.put(DataBaseHistorySearch.DB_COLUMN_KEY, query);
@@ -356,17 +417,10 @@ public class MainActivity extends BaseActivity implements SensorEventListener {
                 //搜索历史置为不可见
                 mHistoryLayout.setVisibility(View.INVISIBLE);
 
-                if (newText != null && !newText.isEmpty()) {
-                    try {
-                        mSuggestionSearch.requestSuggestion((new SuggestionSearchOption())
-                                .keyword(newText)
-                                .city("全国")
-                        );
-                    } catch (Exception e) {
-                        GoUtils.DisplayToast(MainActivity.this, getResources().getString(R.string.app_error_search));
-                        XLog.d(getResources().getString(R.string.app_error_search));
-                    }
-                }
+                // The public service is queried only when the user submits, not per keystroke.
+                photonRequestId++;
+                if (photonCall != null) photonCall.cancel();
+                mSearchLayout.setVisibility(View.INVISIBLE);
 
                 return true;
             }
