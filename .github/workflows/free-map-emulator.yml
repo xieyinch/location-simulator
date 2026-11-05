@@ -36,5 +36,8 @@ jobs:
             adb shell am start -W -n com.zcshou.gogogo/.FreeMapActivity
             sleep 12
             adb shell pidof com.zcshou.gogogo
+            adb shell "am start-foreground-service -n com.zcshou.gogogo/.FreeSimulationService --es points '[{\"lat\":34.23,\"lon\":108.94},{\"lat\":34.231,\"lon\":108.94}]'"
+            sleep 5
+            adb shell dumpsys activity services | grep -q 'com.zcshou.gogogo/.FreeSimulationService'
             adb logcat -d -s AndroidRuntime:E > runtime.log
             if grep -q 'FATAL EXCEPTION' runtime.log; then cat runtime.log; exit 1; fi
