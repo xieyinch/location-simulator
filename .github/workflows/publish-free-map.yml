@@ -1,0 +1,50 @@
+name: Publish free map beta
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-free-map.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.event.head_commit.message == 'Publish free map beta'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare legacy build placeholders
+        run: |
+          printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
+          python3 -c "from pathlib import Path; p=Path('app/build.gradle'); s=p.read_text(); p.write_text(s.replace(r'..\\\\keystore\\\\GoGoGo.jks', '../keystore/GoGoGo.jks'))"
+      - name: Build and test
+        run: bash gradlew assembleDebug testDebugUnitTest
+      - name: Publish test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          apk="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          cp "$apk" location-simulator-1.13.0-beta-arm64.apk
+          cat > release-notes.md <<'EOF'
+          ## 免 Key 地图与路线模拟测试版
+
+          - 使用 MapLibre Native + OpenFreeMap 在线地图，地点搜索使用 Photon / OpenStreetMap，不需要申请百度地图 Key。
+          - 支持地图选点、地点收藏与一键传送；尝试将旧版收藏从百度坐标转换为 WGS-84。
+          - 支持在地图上依次点选路线节点、保存与载入路线，并按所设速度通过前台模拟位置服务逐段回放。通知栏或页面可停止模拟。
+          - 可授权显示悬浮方向按钮；点击方向会停止当前路线回放并移动位置。
+          - 更新入口打开本项目发行页，不再弹出原项目更新。
+
+          使用前请在 Android 开发者选项中选择本应用为模拟位置信息应用。地图和搜索依赖公共在线服务，国内覆盖与网络可用性不保证。
+
+          已通过 Android 编译、路线计算单元测试、模拟器启动和模拟服务运行检查；尚未在实际手机或具体目标 App 验证。旧设置、历史记录等页面暂未迁移，先备份重要数据后再升级。
+
+          此为使用原项目公开签名配置的 ARM64 debug 测试包。源码及许可证见本仓库。
+          EOF
+          gh release create v1.13.0-beta.1 location-simulator-1.13.0-beta-arm64.apk \
+            --target "$GITHUB_SHA" --title "1.13.0 免 Key 地图测试版" \
+            --notes-file release-notes.md --prerelease
