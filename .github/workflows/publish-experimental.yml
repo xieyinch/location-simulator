@@ -1,0 +1,49 @@
+name: Build and publish experimental APK
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-experimental.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.event.head_commit.message == 'Build and publish experimental APK'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configure compile placeholders
+        run: |
+          printf 'MAPS_API_KEY=placeholder\nMAPS_SAFE_CODE=placeholder\n' > local.properties
+          python3 -c "from pathlib import Path; p=Path('app/build.gradle'); s=p.read_text(); p.write_text(s.replace(r'..\\\\keystore\\\\GoGoGo.jks', '../keystore/GoGoGo.jks'))"
+      - name: Build debug APK
+        run: bash gradlew assembleDebug
+      - name: Prepare release
+        run: |
+          set -eu
+          apk="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          cp "$apk" location-simulator-experimental-arm64.apk
+          cat > release-notes.md <<'EOF'
+          ## 实验测试版
+
+          本版本基于 GoGoGo 公开的 1.12.3 源码，包含主地图 Photon / OpenStreetMap 地点搜索和位置收藏的初步实现。
+
+          - 地图选点后可通过菜单收藏，点击收藏尝试传送，长按删除。
+          - 构建时使用了百度地图 Key 占位符，百度底图、相关定位与悬浮窗地图可能无法正常使用；这不是完整的免 Key 版本。
+          - 搜索覆盖、收藏和模拟位置尚未经过真机验证。公开搜索服务可能无法访问或限制访问。
+          - 此 APK 为使用原项目公开签名配置构建的 debug 实验包，不保证覆盖安装现有版本；请注意备份数据。
+          - 源码及许可说明参见本仓库与 LICENSE。
+          EOF
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "experimental-${GITHUB_RUN_NUMBER}" location-simulator-experimental-arm64.apk \
+            --target "$GITHUB_SHA" \
+            --title "位置模拟实验版 ${GITHUB_RUN_NUMBER}" \
+            --notes-file release-notes.md --prerelease
