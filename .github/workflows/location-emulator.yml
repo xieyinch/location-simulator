@@ -2,6 +2,8 @@ name: Location injection integration test
 on:
   push:
     branches: [main, codex/restore-gogogo-location]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
