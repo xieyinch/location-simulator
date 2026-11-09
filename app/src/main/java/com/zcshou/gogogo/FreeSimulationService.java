@@ -26,17 +26,23 @@ public class FreeSimulationService extends Service {
     private final Handler handler=new Handler(Looper.getMainLooper());
     private LocationManager manager;
     private final ArrayList<double[]> points=new ArrayList<>();
-    private double speed=1.4;
+    private double speed=1.4, routeMeters;
+    private float bearing;
     private long started;
     private boolean gps,network;
     private final Runnable tick=new Runnable(){@Override public void run(){
         if(points.isEmpty()) return;
         double distance=(SystemClock.elapsedRealtime()-started)/1000.0*speed;
         double[] current=RouteMath.position(points,distance);
+        if(lastPoint!=null && (current[0]!=lastPoint[0] || current[1]!=lastPoint[1])) {
+            Location previous=new Location("previous"); previous.setLatitude(lastPoint[0]); previous.setLongitude(lastPoint[1]);
+            Location next=new Location("next"); next.setLatitude(current[0]); next.setLongitude(current[1]);
+            bearing=(previous.bearingTo(next)+360)%360;
+        }
         lastPoint=current.clone();
         try { if(gps) publish(LocationManager.GPS_PROVIDER,current); if(network) publish(LocationManager.NETWORK_PROVIDER,current); }
         catch(SecurityException | IllegalArgumentException e){ stopSelf(); return; }
-        handler.postDelayed(this,1000);
+        handler.postDelayed(this,250);
     }};
     @Override public void onCreate(){super.onCreate(); manager=(LocationManager)getSystemService(LOCATION_SERVICE);
         NotificationManager nm=(NotificationManager)getSystemService(NOTIFICATION_SERVICE);
@@ -57,7 +63,7 @@ public class FreeSimulationService extends Service {
             if(!gps&&!network){gps=add(LocationManager.GPS_PROVIDER); network=add(LocationManager.NETWORK_PROVIDER);}
             if(!gps&&!network)throw new SecurityException("mock provider unavailable");
             speed=intent.getDoubleExtra("speed",1.4); if(!Double.isFinite(speed)||speed<=0||speed>100)throw new IllegalArgumentException();
-            handler.removeCallbacks(tick);points.clear();points.addAll(parsed);started=SystemClock.elapsedRealtime();handler.post(tick);
+            handler.removeCallbacks(tick);points.clear();points.addAll(parsed);routeMeters=0;for(int j=1;j<points.size();j++)routeMeters+=RouteMath.distance(points.get(j-1),points.get(j));started=SystemClock.elapsedRealtime();handler.post(tick);
         }catch(Exception e){android.util.Log.e("FreeSimulation", "Unable to start mock location",e); Toast.makeText(this,"模拟启动失败，请检查开发者选项和定位设置",Toast.LENGTH_LONG).show(); stopSelf();}
         return START_NOT_STICKY;
     }
@@ -71,10 +77,26 @@ public class FreeSimulationService extends Service {
         WindowManager.LayoutParams p=new WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,PixelFormat.TRANSLUCENT);p.gravity=Gravity.BOTTOM|Gravity.START;p.y=120;
         try{windowManager.addView(controls,p);}catch(Exception e){controls=null;Toast.makeText(this,"无法显示悬浮摇杆",Toast.LENGTH_SHORT).show();}
     }
-    private void addControl(LinearLayout row,String label,double lat,double lon){Button b=new Button(this);b.setText(label);b.setOnClickListener(v->{if(lastPoint==null)return;double nlat=Math.max(-90,Math.min(90,lastPoint[0]+lat));double nlon=Math.max(-180,Math.min(180,lastPoint[1]+lon));lastPoint=new double[]{nlat,nlon};points.clear();points.add(lastPoint.clone());started=SystemClock.elapsedRealtime();Toast.makeText(this,"已暂停路线并移动位置",Toast.LENGTH_SHORT).show();});row.addView(b);}
+    private void addControl(LinearLayout row,String label,double lat,double lon){Button b=new Button(this);b.setText(label);b.setOnClickListener(v->{if(lastPoint==null)return;double nlat=Math.max(-90,Math.min(90,lastPoint[0]+lat));double nlon=Math.max(-180,Math.min(180,lastPoint[1]+lon));lastPoint=new double[]{nlat,nlon};points.clear();points.add(lastPoint.clone());routeMeters=0;started=SystemClock.elapsedRealtime();Toast.makeText(this,"已暂停路线并移动位置",Toast.LENGTH_SHORT).show();});row.addView(b);}
     private void hideControls(){if(controls!=null){try{windowManager.removeView(controls);}catch(Exception ignored){}controls=null;}}
-    private boolean add(String provider){try {manager.addTestProvider(provider,false,false,false,false,true,true,true,android.location.Criteria.POWER_LOW,android.location.Criteria.ACCURACY_FINE);manager.setTestProviderEnabled(provider,true);return true;}catch(Exception e){android.util.Log.w("FreeSimulation","Provider unavailable: "+provider,e);return false;}}
-    private void publish(String provider,double[] p){Location l=new Location(provider);l.setLatitude(p[0]);l.setLongitude(p[1]);l.setAccuracy(5);l.setAltitude(55);l.setTime(System.currentTimeMillis());l.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());manager.setTestProviderLocation(provider,l);}
+    // Based on ServiceGo from GoGoGo 1.12.3: publish both GPS and NETWORK.
+    private boolean add(String provider){
+        try {
+            if(LocationManager.GPS_PROVIDER.equals(provider))
+                manager.addTestProvider(provider,false,true,false,false,true,true,true,android.location.Criteria.POWER_HIGH,android.location.Criteria.ACCURACY_FINE);
+            else
+                manager.addTestProvider(provider,true,false,true,true,true,true,true,android.location.Criteria.POWER_LOW,android.location.Criteria.ACCURACY_COARSE);
+            manager.setTestProviderEnabled(provider,true);return true;
+        }catch(Exception e){android.util.Log.w("FreeSimulation","Provider unavailable: "+provider,e);return false;}
+    }
+    private void publish(String provider,double[] p){
+        Location l=new Location(provider);l.setLatitude(p[0]);l.setLongitude(p[1]);
+        l.setAccuracy(LocationManager.GPS_PROVIDER.equals(provider)?3f:15f);l.setAltitude(55);
+        l.setBearing(bearing);l.setSpeed(routeMeters>0 && (SystemClock.elapsedRealtime()-started)/1000.0*speed<routeMeters?(float)speed:0f);
+        l.setTime(System.currentTimeMillis());l.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+        if(LocationManager.GPS_PROVIDER.equals(provider)){Bundle extras=new Bundle();extras.putInt("satellites",7);l.setExtras(extras);}
+        manager.setTestProviderLocation(provider,l);
+    }
     @Override public void onDestroy(){handler.removeCallbacks(tick);hideControls();if(gps)try{manager.removeTestProvider(LocationManager.GPS_PROVIDER);}catch(Exception ignored){} if(network)try{manager.removeTestProvider(LocationManager.NETWORK_PROVIDER);}catch(Exception ignored){} super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return null;}
 }

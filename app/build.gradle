@@ -12,13 +12,13 @@ android {
 
     signingConfigs {
         debug {
-            storeFile file('..\\keystore\\GoGoGo.jks')
+            storeFile file('../keystore/GoGoGo.jks')
             storePassword 'GoGoGo'
             keyAlias 'GoGoKey'
             keyPassword 'GoGoGo'
         }
         release {
-            storeFile file('..\\keystore\\GoGoGo.jks')
+            storeFile file('../keystore/GoGoGo.jks')
             storePassword 'GoGoGo'
             keyAlias 'GoGoKey'
             keyPassword 'GoGoGo'
@@ -26,12 +26,13 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.zcshou.gogogo"
+        applicationId "io.github.xieyinch.locationsimulator"
+        manifestPlaceholders = [AMAP_ANDROID_KEY: System.getenv("AMAP_ANDROID_KEY") ?: ""]
         minSdkVersion 27
         //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 32
-        versionCode 1124
-        versionName '1.13.0' // https://semver.org/lang/zh-CN/
+        versionCode 1200
+        versionName '1.20.0' // https://semver.org/lang/zh-CN/
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         resourceConfigurations += ['zh', 'zh-rCN', 'en', 'en-rUS']
         ndk {
@@ -112,7 +113,7 @@ android {
 }
 
 dependencies {
-    implementation 'org.maplibre.gl:android-sdk:11.11.0'
+    implementation 'com.amap.api:3dmap-location-search:11.2.000_loc11.2.000_sea9.8.0'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     // AppCompat 1.5.1 开始显式依赖于 Lifecycle 2.5.1 和 SavedState 1.2.0
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.5.1'
