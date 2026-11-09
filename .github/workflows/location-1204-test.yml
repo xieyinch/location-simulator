@@ -44,6 +44,6 @@ jobs:
             adb shell pm grant io.github.xieyinch.locationsimulator android.permission.ACCESS_COARSE_LOCATION
             adb shell pm grant io.github.xieyinch.locationsimulator android.permission.ACCESS_BACKGROUND_LOCATION
             adb shell appops set io.github.xieyinch.locationsimulator android:mock_location allow
-            adb shell am instrument -w -e class com.zcshou.gogogo.MockLocationInstrumentedTest io.github.xieyinch.locationsimulator.test/androidx.test.runner.AndroidJUnitRunner > instrument-output.txt
+            adb shell am instrument -w -e class com.zcshou.gogogo.MockLocationInstrumentedTest,com.zcshou.gogogo.MockAuthorizationInstrumentedTest io.github.xieyinch.locationsimulator.test/androidx.test.runner.AndroidJUnitRunner > instrument-output.txt
             cat instrument-output.txt
             grep -Fq 'OK (2 tests)' instrument-output.txt
