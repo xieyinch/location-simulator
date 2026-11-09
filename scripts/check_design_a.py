@@ -52,10 +52,15 @@ root=tree();tap(find(root,**{'content-desc':'设置'}))
 root=tree();find(root,text='手动输入坐标');tap(find(root,text='手动输入坐标'))
 root=tree();fields=[n for n in root.iter('node') if n.attrib.get('class')=='android.widget.EditText']
 assert len(fields)==2
-for node,value in zip(fields,['34.230000','108.940000']):
-    tap(node);adb('shell','input','text',value)
-adb('shell','input','keyevent','4')
-root=tree();tap(find(root,text='选择'))
+for index,value in enumerate(['34.230000','108.940000']):
+    root=tree();fields=[n for n in root.iter('node') if n.attrib.get('class')=='android.widget.EditText']
+    tap(fields[index]);adb('shell','input','text',value)
+root=tree()
+try:
+    confirm=find(root,text='选择')
+except AssertionError:
+    adb('shell','input','keyevent','4');root=tree();confirm=find(root,text='选择')
+tap(confirm)
 root=tree();find(root,text='已选位置');find(root,text='开始模拟')
 tap(find(root,text='开始模拟'))
 for _ in range(20):
