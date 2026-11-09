@@ -21,6 +21,26 @@ public final class RouteMath {
         }
         return current.clone();
     }
+    /** Repeat the outward route, returning in a straight line between passes; end at destination. */
+    public static double totalDistance(List<double[]> points,double outward,int loops) {
+        if(points.size()<2 || outward<=0) return 0;
+        return outward * loops + distance(points.get(points.size()-1),points.get(0)) * (loops-1);
+    }
+    public static double[] loopPosition(List<double[]> points,double travelled,int loops) {
+        if(points.size()<2)return position(points,0);
+        double outward=0;for(int i=1;i<points.size();i++)outward+=distance(points.get(i-1),points.get(i));
+        return loopPosition(points,travelled,loops,outward);
+    }
+    public static double[] loopPosition(List<double[]> points,double travelled,int loops,double outward) {
+        if(points.size()<2)return position(points,0);
+        if(outward<=0)return points.get(points.size()-1).clone();
+        double back=distance(points.get(points.size()-1),points.get(0));
+        double cycle=outward+back, total=totalDistance(points,outward,loops);
+        if(travelled>=total)return points.get(points.size()-1).clone();
+        double within=Math.max(0,travelled)%cycle;
+        if(within<=outward)return position(points,within);
+        return position(java.util.Arrays.asList(points.get(points.size()-1),points.get(0)),within-outward);
+    }
     public static double distance(double[] a, double[] b) {
         double lat1 = Math.toRadians(a[0]), lat2 = Math.toRadians(b[0]);
         double dlat = lat2 - lat1, dlon = Math.toRadians(b[1] - a[1]);
