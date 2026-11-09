@@ -40,6 +40,8 @@ public class MockLocationInstrumentedTest {
             long changeStart=SystemClock.elapsedRealtime();ContextCompat.startForegroundService(context,change);result=null;
             while(SystemClock.elapsedRealtime()-changeStart<5000){Location candidate=lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);if(candidate!=null&&Math.abs(candidate.getLatitude()-34.24)<0.0001&&Math.abs(candidate.getLongitude()-108.95)<0.0001){result=candidate;break;}SystemClock.sleep(100);}
             assertNotNull("运行中切换位置后系统 GPS 未在 5 秒内更新",result);
+            assertEquals("固定点速度应与影梭原版一致",1.2f,result.getSpeed(),0.001f);
+            SystemClock.sleep(1200);
         }finally{context.stopService(new Intent(context,ServiceGo.class));InstrumentationRegistry.getInstrumentation().runOnMainSync(()->lm.removeUpdates(listener));}
     }
 }
