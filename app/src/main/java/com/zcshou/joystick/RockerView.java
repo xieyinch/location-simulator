@@ -74,8 +74,8 @@ public class RockerView extends View {
         innerIconPaint.setAntiAlias(true);
         innerIconPaint.setFilterBitmap(true);
 
-        isAuto = true;
-        mRockerBitmap = scaleBitmap(getBitmap(getContext(), R.drawable.ic_lock_close));
+        isAuto = false;
+        mRockerBitmap = scaleBitmap(getBitmap(getContext(), R.drawable.ic_lock_open));
         srcRect = new Rect(0, 0, mRockerBitmap.getWidth(), mRockerBitmap.getHeight());
     }
 
@@ -138,6 +138,11 @@ public class RockerView extends View {
                 moveToPosition(event.getX(), event.getY());
                 isClick = false;
                 break;
+            case MotionEvent.ACTION_CANCEL:
+                isClick = false;
+                moveToPosition(viewCenterX, viewCenterY);
+                invalidate();
+                break;
             case MotionEvent.ACTION_UP:
                 if (isClick) {
                     isClick = false;
@@ -178,7 +183,7 @@ public class RockerView extends View {
         invalidate();
         double angle = Math.toDegrees(Math.atan2((innerCenterX - viewCenterX), (innerCenterY-viewCenterY))) - 90;
         double r = Math.sqrt(Math.pow(innerCenterX - viewCenterX, 2) + Math.pow(innerCenterY-viewCenterY, 2)) / (outerCircleRadius-innerCircleRadius);
-        mListener.clickAngleInfo(true, angle, r);
+        if (mListener != null) mListener.clickAngleInfo(true, angle, r);
     }
 
     private static Bitmap getBitmap(VectorDrawable vectorDrawable) {

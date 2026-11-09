@@ -95,8 +95,6 @@
             </intent-filter>
         </activity>
 
-        <service android:name="com.zcshou.gogogo.FreeSimulationService" android:exported="false" />
-
         <activity
             android:name="com.zcshou.gogogo.MainActivity"
             android:launchMode="singleInstance"
