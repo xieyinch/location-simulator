@@ -15,6 +15,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.location.Criteria;
 import android.location.Location;
 import android.location.LocationManager;
+import android.location.LocationListener;
 import android.location.provider.ProviderProperties;
 import android.os.Binder;
 import android.os.Build;
@@ -59,7 +60,8 @@ public class ServiceGo extends Service {
     private LocationManager manager;
     private HandlerThread locationThread;
     private Handler worker;
-    private boolean gps,network;
+    private boolean gps,network,fused;
+    private LocationListener keepAlive;
     private volatile boolean running;
     private final java.util.concurrent.atomic.AtomicInteger generation=new java.util.concurrent.atomic.AtomicInteger();
     private volatile boolean failed,paused,routeActive;
@@ -124,6 +126,8 @@ public class ServiceGo extends Service {
             removeProvider(LocationManager.GPS_PROVIDER);gps=addProvider(LocationManager.GPS_PROVIDER);
         }
         if(!gps&&!network){failed=true;updateStatus("启动失败：系统未允许模拟位置。请在开发者选项中选择本应用，并确认系统定位已开启。",false);stopSelf();return;}
+        if(keepAlive==null)startProviderListeners();
+        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.S&&!fused)fused=addFusedProvider();
         failed=false;
         synchronized(lock){points.clear();points.addAll(next);latitude=points.get(0)[0];longitude=points.get(0)[1];speed=nextSpeed;routeLoops=loops;pingPong=backwards;paused=false;routeActive=points.size()>1;routeLength=0;for(int i=1;i<points.size();i++)routeLength+=RouteMath.distance(points.get(i-1),points.get(i));joyStrength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;failedTicks=0;gpsFailures=networkFailures=0;gpsRecoveries=networkRecoveries=0;lastGpsRecovery=lastNetworkRecovery=0;running=true;}
         worker.removeCallbacks(tick);lastStatus=0;tick.run();
@@ -138,12 +142,13 @@ public class ServiceGo extends Service {
             lat=latitude;lon=longitude;b=bearing;
         }
         boolean networkOk=network&&publishNetwork(lat,lon,b,velocity),gpsOk=gps&&publishGps(lat,lon,b,velocity);
+        boolean fusedOk=fused&&publishFused(lat,lon,b,velocity);
         long recoveryNow=SystemClock.elapsedRealtime();
         gpsFailures=gpsOk?0:gpsFailures+1;networkFailures=networkOk?0:networkFailures+1;
         if(!gpsOk && gpsFailures>=3 && gpsRecoveries<3 && recoveryNow-lastGpsRecovery>=5000){lastGpsRecovery=recoveryNow;gpsRecoveries++;removeProvider(LocationManager.GPS_PROVIDER);gps=addProvider(LocationManager.GPS_PROVIDER);}
         if(!networkOk && networkFailures>=3 && networkRecoveries<3 && recoveryNow-lastNetworkRecovery>=5000){lastNetworkRecovery=recoveryNow;networkRecoveries++;removeProvider(LocationManager.NETWORK_PROVIDER);network=addProvider(LocationManager.NETWORK_PROVIDER);}
         if(!gpsOk&&!networkOk){failedTicks++;if(failedTicks>=30){failed=true;updateStatus("定位发布失败：GPS 和网络定位通道均调用失败。请检查模拟位置授权和定位开关。",false);stopSelf();return;}}
-        else{failedTicks=0;long now=SystemClock.elapsedRealtime();if(now-lastStatus>=2000){lastStatus=now;updateStatus((paused?"路线已暂停 · ":"模拟位置已提交 · ")+"GPS "+(gpsOk?"已提交":"不可用")+" / 网络 "+(networkOk?"已提交":"不可用"),true);}}
+        else{failedTicks=0;long now=SystemClock.elapsedRealtime();if(now-lastStatus>=2000){lastStatus=now;updateStatus((paused?"路线已暂停 · ":"模拟位置已提交 · ")+"GPS "+(gpsOk?"已提交":"不可用")+" / 网络 "+(networkOk?"已提交":"不可用")+" / 融合 "+(fusedOk?"已提交":"不可用"),true);}}
         worker.postDelayed(this,PERIOD_MS);
     }};
 
@@ -163,6 +168,28 @@ public class ServiceGo extends Service {
         }catch(Exception e){Log.e("ServiceGo","Cannot register "+provider,e);return false;}
     }
     private void removeProvider(String provider){try{manager.removeTestProvider(provider);}catch(Exception ignored){}}
+    private void startProviderListeners(){
+        keepAlive=new LocationListener(){@Override public void onLocationChanged(Location ignored){}};
+        for(String provider:new String[]{LocationManager.GPS_PROVIDER,LocationManager.NETWORK_PROVIDER}){
+            try{manager.requestLocationUpdates(provider,1000,0f,keepAlive,locationThread.getLooper());}
+            catch(SecurityException|IllegalArgumentException e){Log.w("ServiceGo","Cannot subscribe to "+provider,e);}
+        }
+    }
+    private boolean addFusedProvider(){
+        boolean registered=false;
+        try{
+            manager.addTestProvider(LocationManager.FUSED_PROVIDER,false,true,false,false,true,true,true,ProviderProperties.POWER_USAGE_LOW,ProviderProperties.ACCURACY_FINE);
+            registered=true;
+            manager.setTestProviderEnabled(LocationManager.FUSED_PROVIDER,true);
+            return true;
+        }catch(Exception e){if(registered)removeProvider(LocationManager.FUSED_PROVIDER);Log.i("ServiceGo","System fused test provider unavailable",e);return false;}
+    }
+    private boolean publishFused(double lat,double lon,float b,float velocity){
+        try{
+            Location location=new Location(LocationManager.FUSED_PROVIDER);location.setAccuracy(5f);location.setAltitude(altitude);location.setBearing(b);location.setLatitude(lat);location.setLongitude(lon);location.setTime(System.currentTimeMillis());location.setSpeed(velocity);location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+            manager.setTestProviderLocation(LocationManager.FUSED_PROVIDER,location);return true;
+        }catch(Exception e){Log.w("ServiceGo","Fused update failed",e);return false;}
+    }
     private boolean publishGps(double lat,double lon,float b,float velocity){
         try{Location location=new Location(LocationManager.GPS_PROVIDER);location.setAccuracy(Criteria.ACCURACY_FINE);location.setAltitude(altitude);location.setBearing(b);location.setLatitude(lat);location.setLongitude(lon);location.setTime(System.currentTimeMillis());location.setSpeed(velocity);location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());Bundle extras=new Bundle();extras.putInt("satellites",7);location.setExtras(extras);manager.setTestProviderLocation(LocationManager.GPS_PROVIDER,location);return true;}catch(Exception e){Log.w("ServiceGo","GPS update failed",e);return false;}
     }
@@ -187,7 +214,7 @@ public class ServiceGo extends Service {
     }
     private void addSpeed(LinearLayout row,String text,double value,String name){Button button=new Button(this);button.setText(text);button.setTextSize(12);button.setPadding(0,0,0,0);button.setMinWidth(0);button.setOnClickListener(v->{synchronized(lock){joySpeed=value;}speedLabel.setText(name);});row.addView(button,new LinearLayout.LayoutParams(dp(38),dp(38)));}
     private void hideControls(){synchronized(lock){if(joyStrength>0){points.clear();points.add(new double[]{latitude,longitude});routeLength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;}joyStrength=0;}if(controls!=null){try{windowManager.removeView(controls);}catch(Exception ignored){}controls=null;}}
-    @Override public void onDestroy(){generation.incrementAndGet();synchronized(lock){running=false;joyStrength=0;}if(worker!=null)worker.removeCallbacksAndMessages(null);hideControls();if(gps)removeProvider(LocationManager.GPS_PROVIDER);if(network)removeProvider(LocationManager.NETWORK_PROVIDER);if(locationThread!=null)locationThread.quitSafely();if(!failed)updateStatus("模拟已停止",false);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    @Override public void onDestroy(){generation.incrementAndGet();synchronized(lock){running=false;joyStrength=0;}if(worker!=null)worker.removeCallbacksAndMessages(null);hideControls();if(keepAlive!=null)try{manager.removeUpdates(keepAlive);}catch(Exception e){Log.w("ServiceGo","Cannot remove location listener",e);}if(fused)removeProvider(LocationManager.FUSED_PROVIDER);if(gps)removeProvider(LocationManager.GPS_PROVIDER);if(network)removeProvider(LocationManager.NETWORK_PROVIDER);if(locationThread!=null)locationThread.quitSafely();if(!failed)updateStatus("模拟已停止",false);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return binder;}
     public class ServiceGoBinder extends Binder {public void setPosition(double lng,double lat,double alt){try{validate(lat,lng);altitude=alt;ArrayList<double[]> p=new ArrayList<>();p.add(new double[]{lat,lng});worker.post(()->startPosition(p,1.2,1,false));}catch(Exception e){updateStatus("坐标无效",false);}}}
 }
