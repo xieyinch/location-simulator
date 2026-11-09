@@ -88,7 +88,7 @@ public class ServiceGo extends Service {
     }
 
     @Override public int onStartCommand(Intent intent,int flags,int startId){
-        if(intent==null||ACTION_STOP.equals(intent.getAction())){generation.incrementAndGet();stopSelf();return START_NOTICKY;}
+        if(intent==null||ACTION_STOP.equals(intent.getAction())){generation.incrementAndGet();stopSelf();return START_NOT_STICKY;}
         if(ACTION_SHOW_CONTROLS.equals(intent.getAction())){showControls();return START_NOT_STICKY;}
         try{
             ArrayList<double[]> next=new ArrayList<>();String json=intent.getStringExtra("points");
