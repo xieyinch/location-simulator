@@ -25,8 +25,11 @@ public final class ProbeActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         manager=(LocationManager)getSystemService(LOCATION_SERVICE);
-        manager.requestLocationUpdates(LocationManager.GPS_PROVIDER,0,0,listener,Looper.getMainLooper());
-        manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,0,0,listener,Looper.getMainLooper());
+        try {
+            manager.requestLocationUpdates(LocationManager.GPS_PROVIDER,0,0,listener,Looper.getMainLooper());
+            manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,0,0,listener,Looper.getMainLooper());
+            Log.i("LocationProbe", "READY");
+        } catch (RuntimeException error) { Log.e("LocationProbe", "LISTENER_ERROR", error); throw error; }
     }
     @Override public void onDestroy() { if(manager!=null)manager.removeUpdates(listener);super.onDestroy(); }
 }

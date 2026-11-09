@@ -49,7 +49,10 @@ jobs:
             adb shell pm grant io.github.locationsimulator.probe android.permission.ACCESS_COARSE_LOCATION
             adb shell pm grant io.github.locationsimulator.probe android.permission.ACCESS_BACKGROUND_LOCATION
             adb logcat -c
-            adb shell am start -n io.github.locationsimulator.probe/.ProbeActivity
+            adb shell am start -W -n io.github.locationsimulator.probe/.ProbeActivity
+            adb logcat -d -s LocationProbe:I '*:S' > probe-ready.txt
+            cat probe-ready.txt
+            grep -Fq READY probe-ready.txt
             adb shell am instrument -w -e class com.zcshou.gogogo.MockLocationInstrumentedTest,com.zcshou.gogogo.MockAuthorizationInstrumentedTest io.github.xieyinch.locationsimulator.test/androidx.test.runner.AndroidJUnitRunner > instrument-output.txt
             cat instrument-output.txt
             grep -Fq 'OK (2 tests)' instrument-output.txt
