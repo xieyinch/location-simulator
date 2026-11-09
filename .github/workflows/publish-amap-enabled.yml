@@ -1,0 +1,74 @@
+name: Build AMap-enabled APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-amap-enabled.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'Publish AMap 1.20.1'
+    runs-on: ubuntu-latest
+    env:
+      AMAP_ANDROID_KEY: ${{ secrets.AMAP_ANDROID_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Require the map key
+        run: |
+          if [ -z "$AMAP_ANDROID_KEY" ]; then
+            echo "::error::Configure repository secret AMAP_ANDROID_KEY before running this workflow."
+            exit 1
+          fi
+      - name: Configure legacy placeholders
+        run: printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
+      - name: Build and test
+        run: bash gradlew assembleDebug testDebugUnitTest
+      - name: Verify package and embedded key
+        run: |
+          set -eu
+          apk="$(find app/build/outputs/apk/debug -name '*.apk' -type f -print -quit)"
+          test -n "$apk"
+          aapt="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          "$aapt" dump badging "$apk" > /tmp/apk-info.txt
+          grep -F "package: name='io.github.xieyinch.locationsimulator'" /tmp/apk-info.txt
+          "$aapt" dump xmltree "$apk" AndroidManifest.xml > /tmp/apk-manifest.txt
+          if ! grep -Fq -- "$AMAP_ANDROID_KEY" /tmp/apk-manifest.txt; then
+            echo "::error::The configured AMap key was not embedded in the APK."
+            rm -f /tmp/apk-manifest.txt
+            exit 1
+          fi
+          rm -f /tmp/apk-manifest.txt
+          unzip -Z1 "$apk" > /tmp/apk-contents.txt
+          grep -q 'lib/arm64-v8a/' /tmp/apk-contents.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
+          cp "$apk" location-simulator-1.20.1-amap-arm64.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: location-simulator-1.20.1-amap-arm64
+          path: location-simulator-1.20.1-amap-arm64.apk
+          if-no-files-found: error
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## 位置模拟 1.20.1 测试版
+
+          内置仓库配置的高德 Android SDK Key，首次使用高德地图前仍需同意 SDK 隐私说明。应用包名和签名保持不变。
+
+          包含高德地图与搜索、逐点及手绘路线、步行路线规划、收藏、路线回放与影梭式 GPS / NETWORK 模拟定位。
+
+          已运行构建与单元测试，并检查 APK 包名、ARM64 架构、签名与 Key 注入。地图服务是否正常仍依赖 Key 的绑定与服务权限、网络及设备；尚需在真实手机上测试。
+
+          独立包名可与旧影梭并存，旧应用数据不会自动跨包迁移。本测试包使用原项目公开签名材料。
+          EOF
+          gh release create v1.20.1-beta.1 location-simulator-1.20.1-amap-arm64.apk \
+            --target "$GITHUB_SHA" --title "位置模拟 1.20.1 高德内置版" \
+            --notes-file release-notes.md --prerelease
