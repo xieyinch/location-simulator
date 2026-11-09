@@ -50,12 +50,14 @@
     <application
         android:name="android.app.Application"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
+        android:label="位置模拟"
         android:launchMode="singleInstance"
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+
+        <meta-data android:name="com.amap.api.v2.apikey" android:value="${AMAP_ANDROID_KEY}" />
 
         <uses-library
             android:name="org.apache.http.legacy"
@@ -83,7 +85,7 @@
         </provider>
 
         <activity
-            android:name=".FreeMapActivity"
+            android:name="com.zcshou.gogogo.FreeMapActivity"
             android:exported="true"
             android:theme="@style/AppTheme.NoActionBar"
             >
@@ -93,21 +95,21 @@
             </intent-filter>
         </activity>
 
-        <service android:name=".FreeSimulationService" android:exported="false" />
+        <service android:name="com.zcshou.gogogo.FreeSimulationService" android:exported="false" />
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.zcshou.gogogo.MainActivity"
             android:launchMode="singleInstance"
             android:exported="false"
             android:theme="@style/AppTheme.NoActionBar" />
 
         <activity
-            android:name=".SettingsActivity"
+            android:name="com.zcshou.gogogo.SettingsActivity"
             android:label="@string/app_settings"
             android:exported="false" />
 
         <activity
-            android:name=".HistoryActivity"
+            android:name="com.zcshou.gogogo.HistoryActivity"
             android:label="@string/app_history"
             android:exported="false" />
 

@@ -1,0 +1,30 @@
+name: Android APK
+on:
+  push:
+    branches: [main, codex/portal-integration-ios]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Configure legacy build placeholders
+        run: printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
+      - name: Build and test
+        env:
+          AMAP_ANDROID_KEY: ${{ secrets.AMAP_ANDROID_KEY }}
+        run: bash gradlew assembleDebug testDebugUnitTest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: location-simulator-arm64-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
