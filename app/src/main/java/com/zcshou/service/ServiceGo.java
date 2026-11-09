@@ -47,6 +47,7 @@ import java.util.ArrayList;
 public class ServiceGo extends Service {
     public static final String ACTION_STOP="com.zcshou.gogogo.STOP_SIMULATION";
     public static final String ACTION_SHOW_CONTROLS="com.zcshou.gogogo.SHOW_CONTROLS";
+    public static final String ACTION_PAUSE="com.zcshou.gogogo.PAUSE_ROUTE";
     public static final String ACTION_STATUS="com.zcshou.gogogo.SIMULATION_STATUS";
     public static final String STATUS_PREFS="location_status";
     private static final String CHANNEL="SERVICE_GO_NOTE";
@@ -61,7 +62,9 @@ public class ServiceGo extends Service {
     private boolean gps,network;
     private volatile boolean running;
     private final java.util.concurrent.atomic.AtomicInteger generation=new java.util.concurrent.atomic.AtomicInteger();
-    private volatile boolean failed;
+    private volatile boolean failed,paused,routeActive;
+    private long pausedAt;
+    private boolean pingPong;
     private double latitude,longitude,altitude=55.0,speed=1.2,routeLength;
     private float bearing;
     private double joyAngle,joyStrength,joySpeed=1.2;
@@ -92,6 +95,7 @@ public class ServiceGo extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent==null||ACTION_STOP.equals(intent.getAction())){generation.incrementAndGet();stopSelf();return START_NOT_STICKY;}
         if(ACTION_SHOW_CONTROLS.equals(intent.getAction())){showControls();return START_NOT_STICKY;}
+        if(ACTION_PAUSE.equals(intent.getAction())){worker.post(()->{synchronized(lock){if(!running||!routeActive)return;long now=SystemClock.elapsedRealtime();if(paused){routeStarted+=now-pausedAt;paused=false;}else{pausedAt=now;paused=true;joyStrength=0;}lastTick=now;}lastStatus=0;});return START_NOT_STICKY;}
         try{
             ArrayList<double[]> next=new ArrayList<>();String json=intent.getStringExtra("points");
             if(json!=null){JSONArray a=new JSONArray(json);if(a.length()==0||a.length()>10000)throw new IllegalArgumentException("路线点数量无效");
@@ -102,7 +106,7 @@ public class ServiceGo extends Service {
             double nextSpeed=intent.getDoubleExtra("speed",1.2);if(!Double.isFinite(nextSpeed)||nextSpeed<=0||nextSpeed>100)throw new IllegalArgumentException("速度无效");
             int loops=intent.getIntExtra("loops",1);if(loops<1||loops>999)throw new IllegalArgumentException("循环次数无效");
             updateStatus("正在切换模拟位置…",running);
-            int token=generation.incrementAndGet();worker.postAtFrontOfQueue(()->{if(token==generation.get())startPosition(next,nextSpeed,loops);});
+            boolean backwards=intent.getBooleanExtra("ping_pong",false);int token=generation.incrementAndGet();worker.postAtFrontOfQueue(()->{if(token==generation.get())startPosition(next,nextSpeed,loops,backwards);});
         }catch(Exception e){failed=true;updateStatus("无法启动："+e.getMessage(),false);stopSelf();}
         return START_NOT_STICKY;
     }
@@ -112,7 +116,7 @@ public class ServiceGo extends Service {
         return ops!=null && ops.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION,android.os.Process.myUid(),getPackageName())==AppOpsManager.MODE_ALLOWED;
     }
     private void stopForAuthorization(){failed=true;updateStatus("模拟位置授权已失效：请在开发者选项重新选择本应用",false);stopSelf();}
-    private void startPosition(ArrayList<double[]> next,double nextSpeed,int loops){
+    private void startPosition(ArrayList<double[]> next,double nextSpeed,int loops,boolean backwards){
         if(!hasMockAuthorization()){stopForAuthorization();return;}
         if(!gps&&!network){
             // Follow ServiceGo 1.12.3: reset and register NETWORK and GPS independently.
@@ -121,7 +125,7 @@ public class ServiceGo extends Service {
         }
         if(!gps&&!network){failed=true;updateStatus("启动失败：系统未允许模拟位置。请在开发者选项中选择本应用，并确认系统定位已开启。",false);stopSelf();return;}
         failed=false;
-        synchronized(lock){points.clear();points.addAll(next);latitude=points.get(0)[0];longitude=points.get(0)[1];speed=nextSpeed;routeLoops=loops;routeLength=0;for(int i=1;i<points.size();i++)routeLength+=RouteMath.distance(points.get(i-1),points.get(i));joyStrength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;failedTicks=0;gpsFailures=networkFailures=0;gpsRecoveries=networkRecoveries=0;lastGpsRecovery=lastNetworkRecovery=0;running=true;}
+        synchronized(lock){points.clear();points.addAll(next);latitude=points.get(0)[0];longitude=points.get(0)[1];speed=nextSpeed;routeLoops=loops;pingPong=backwards;paused=false;routeActive=points.size()>1;routeLength=0;for(int i=1;i<points.size();i++)routeLength+=RouteMath.distance(points.get(i-1),points.get(i));joyStrength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;failedTicks=0;gpsFailures=networkFailures=0;gpsRecoveries=networkRecoveries=0;lastGpsRecovery=lastNetworkRecovery=0;running=true;}
         worker.removeCallbacks(tick);lastStatus=0;tick.run();
         if(Settings.canDrawOverlays(this))new Handler(getMainLooper()).post(this::showControls);
     }
@@ -130,7 +134,7 @@ public class ServiceGo extends Service {
         final double lat,lon;final float b,velocity;
         synchronized(lock){if(!running)return;long now=SystemClock.elapsedRealtime();double dt=Math.max(0,Math.min(1,(now-lastTick)/1000.0));lastTick=now;
             if(joyStrength>0){double metres=joySpeed*joyStrength*dt;double angle=Math.toRadians(joyAngle);latitude+=metres*Math.sin(angle)/110574.0;double cos=Math.cos(Math.toRadians(latitude));longitude+=metres*Math.cos(angle)/(111320.0*Math.max(0.01,Math.abs(cos)));latitude=Math.max(-90,Math.min(90,latitude));longitude=((longitude+540)%360)-180;bearing=(float)((90-joyAngle+360)%360);velocity=(float)(joySpeed*joyStrength);}
-            else{double distance=(now-routeStarted)/1000.0*speed;double[] p=RouteMath.loopPosition(points,distance,routeLoops,routeLength);if(p[0]!=latitude||p[1]!=longitude){Location old=new Location("old");old.setLatitude(latitude);old.setLongitude(longitude);Location next=new Location("next");next.setLatitude(p[0]);next.setLongitude(p[1]);bearing=(old.bearingTo(next)+360)%360;}latitude=p[0];longitude=p[1];velocity=routeLength>0?(distance<RouteMath.totalDistance(points,routeLength,routeLoops)?(float)speed:0f):1.2f;}
+            else{double distance=((paused?pausedAt:now)-routeStarted)/1000.0*speed;double[] p=pingPong?RouteMath.pingPongPosition(points,distance,routeLoops,routeLength):RouteMath.loopPosition(points,distance,routeLoops,routeLength);if(p[0]!=latitude||p[1]!=longitude){Location old=new Location("old");old.setLatitude(latitude);old.setLongitude(longitude);Location next=new Location("next");next.setLatitude(p[0]);next.setLongitude(p[1]);bearing=(old.bearingTo(next)+360)%360;}latitude=p[0];longitude=p[1];velocity=routeLength>0?(!paused && distance<(pingPong?2*routeLength*routeLoops:RouteMath.totalDistance(points,routeLength,routeLoops))?(float)speed:0f):1.2f;}
             lat=latitude;lon=longitude;b=bearing;
         }
         boolean networkOk=network&&publishNetwork(lat,lon,b,velocity),gpsOk=gps&&publishGps(lat,lon,b,velocity);
@@ -139,7 +143,7 @@ public class ServiceGo extends Service {
         if(!gpsOk && gpsFailures>=3 && gpsRecoveries<3 && recoveryNow-lastGpsRecovery>=5000){lastGpsRecovery=recoveryNow;gpsRecoveries++;removeProvider(LocationManager.GPS_PROVIDER);gps=addProvider(LocationManager.GPS_PROVIDER);}
         if(!networkOk && networkFailures>=3 && networkRecoveries<3 && recoveryNow-lastNetworkRecovery>=5000){lastNetworkRecovery=recoveryNow;networkRecoveries++;removeProvider(LocationManager.NETWORK_PROVIDER);network=addProvider(LocationManager.NETWORK_PROVIDER);}
         if(!gpsOk&&!networkOk){failedTicks++;if(failedTicks>=30){failed=true;updateStatus("定位发布失败：GPS 和网络定位通道均调用失败。请检查模拟位置授权和定位开关。",false);stopSelf();return;}}
-        else{failedTicks=0;long now=SystemClock.elapsedRealtime();if(now-lastStatus>=2000){lastStatus=now;updateStatus("模拟位置已提交 · GPS "+(gpsOk?"已提交":"不可用")+" / 网络 "+(networkOk?"已提交":"不可用"),true);}}
+        else{failedTicks=0;long now=SystemClock.elapsedRealtime();if(now-lastStatus>=2000){lastStatus=now;updateStatus((paused?"路线已暂停 · ":"模拟位置已提交 · ")+"GPS "+(gpsOk?"已提交":"不可用")+" / 网络 "+(networkOk?"已提交":"不可用"),true);}}
         worker.postDelayed(this,PERIOD_MS);
     }};
 
@@ -165,7 +169,7 @@ public class ServiceGo extends Service {
     private boolean publishNetwork(double lat,double lon,float b,float velocity){
         try{Location location=new Location(LocationManager.NETWORK_PROVIDER);location.setAccuracy(Criteria.ACCURACY_COARSE);location.setAltitude(altitude);location.setBearing(b);location.setLatitude(lat);location.setLongitude(lon);location.setTime(System.currentTimeMillis());location.setSpeed(velocity);location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());manager.setTestProviderLocation(LocationManager.NETWORK_PROVIDER,location);return true;}catch(Exception e){Log.w("ServiceGo","NETWORK update failed",e);return false;}
     }
-    private void updateStatus(String text,boolean active){getSharedPreferences(STATUS_PREFS,MODE_PRIVATE).edit().putString("text",text).putBoolean("active",active).putLong("time",System.currentTimeMillis()).apply();sendBroadcast(new Intent(ACTION_STATUS).setPackage(getPackageName()).putExtra("text",text));}
+    private void updateStatus(String text,boolean active){getSharedPreferences(STATUS_PREFS,MODE_PRIVATE).edit().putString("text",text).putBoolean("active",active).putBoolean("route",active&&routeActive).putBoolean("paused",active&&paused).putLong("time",System.currentTimeMillis()).apply();sendBroadcast(new Intent(ACTION_STATUS).setPackage(getPackageName()).putExtra("text",text));}
     private int dp(int value){return (int)(value*getResources().getDisplayMetrics().density+.5f);}
     private void showControls(){
         synchronized(lock){if(!running){Toast.makeText(this,"请先开始位置模拟",Toast.LENGTH_SHORT).show();stopSelf();return;}}
@@ -174,7 +178,7 @@ public class ServiceGo extends Service {
         GradientDrawable bg=new GradientDrawable();bg.setColor(0xdd26272a);bg.setCornerRadius(dp(18));controls.setBackground(bg);
         TextView handle=new TextView(this);handle.setText("拖动 · 隐藏");handle.setTextColor(Color.WHITE);handle.setTextSize(13);handle.setGravity(Gravity.CENTER);handle.setPadding(dp(12),dp(8),dp(12),dp(8));controls.addView(handle);
         RockerView rocker=new RockerView(this);rocker.setContentDescription("圆形方向摇杆，拖动移动，松开停止；轻点中央可锁定方向");rocker.setListener((auto,angle,strength)->{
-            synchronized(lock){if(strength>0.01&&joyStrength<=0.01&&points.size()>1){points.clear();points.add(new double[]{latitude,longitude});routeLength=0;routeStarted=SystemClock.elapsedRealtime();}if(strength<=0.01&&joyStrength>0.01){points.clear();points.add(new double[]{latitude,longitude});routeLength=0;routeStarted=SystemClock.elapsedRealtime();}joyAngle=angle;joyStrength=Math.max(0,Math.min(1,strength));lastTick=SystemClock.elapsedRealtime();}
+            synchronized(lock){if(strength>0.01&&joyStrength<=0.01&&points.size()>1){paused=false;routeActive=false;points.clear();points.add(new double[]{latitude,longitude});routeLength=0;routeStarted=SystemClock.elapsedRealtime();}if(strength<=0.01&&joyStrength>0.01){points.clear();points.add(new double[]{latitude,longitude});routeLength=0;routeStarted=SystemClock.elapsedRealtime();}joyAngle=angle;joyStrength=Math.max(0,Math.min(1,strength));lastTick=SystemClock.elapsedRealtime();}
         });controls.addView(rocker,new LinearLayout.LayoutParams(dp(124),dp(124)));
         LinearLayout speedRow=new LinearLayout(this);speedRow.setGravity(Gravity.CENTER);speedLabel=new TextView(this);speedLabel.setTextColor(Color.WHITE);speedLabel.setTextSize(12);speedLabel.setText("步行");speedLabel.setGravity(Gravity.CENTER);controls.addView(speedLabel);addSpeed(speedRow,"步",1.2,"步行");addSpeed(speedRow,"跑",3.0,"跑步");addSpeed(speedRow,"骑",5.0,"骑行");controls.addView(speedRow);
         windowParams=new WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT);windowParams.gravity=Gravity.TOP|Gravity.START;windowParams.x=dp(16);windowParams.y=dp(160);
@@ -185,5 +189,5 @@ public class ServiceGo extends Service {
     private void hideControls(){synchronized(lock){if(joyStrength>0){points.clear();points.add(new double[]{latitude,longitude});routeLength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;}joyStrength=0;}if(controls!=null){try{windowManager.removeView(controls);}catch(Exception ignored){}controls=null;}}
     @Override public void onDestroy(){generation.incrementAndGet();synchronized(lock){running=false;joyStrength=0;}if(worker!=null)worker.removeCallbacksAndMessages(null);hideControls();if(gps)removeProvider(LocationManager.GPS_PROVIDER);if(network)removeProvider(LocationManager.NETWORK_PROVIDER);if(locationThread!=null)locationThread.quitSafely();if(!failed)updateStatus("模拟已停止",false);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return binder;}
-    public class ServiceGoBinder extends Binder {public void setPosition(double lng,double lat,double alt){try{validate(lat,lng);altitude=alt;ArrayList<double[]> p=new ArrayList<>();p.add(new double[]{lat,lng});worker.post(()->startPosition(p,1.2,1));}catch(Exception e){updateStatus("坐标无效",false);}}}
+    public class ServiceGoBinder extends Binder {public void setPosition(double lng,double lat,double alt){try{validate(lat,lng);altitude=alt;ArrayList<double[]> p=new ArrayList<>();p.add(new double[]{lat,lng});worker.post(()->startPosition(p,1.2,1,false));}catch(Exception e){updateStatus("坐标无效",false);}}}
 }

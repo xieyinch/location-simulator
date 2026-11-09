@@ -41,6 +41,14 @@ public final class RouteMath {
         if(within<=outward)return position(points,within);
         return position(java.util.Arrays.asList(points.get(points.size()-1),points.get(0)),within-outward);
     }
+    /** N full out-and-back trips, staying at the start when complete. */
+    public static double[] pingPongPosition(List<double[]> points,double travelled,int loops,double length) {
+        if(points.size()<2 || length<=0)return position(points,0);
+        double total=2*length*loops;
+        if(travelled>=total)return points.get(0).clone();
+        double within=Math.max(0,travelled)%(2*length);
+        return position(points,within<=length?within:2*length-within);
+    }
     public static double distance(double[] a, double[] b) {
         double lat1 = Math.toRadians(a[0]), lat2 = Math.toRadians(b[0]);
         double dlat = lat2 - lat1, dlon = Math.toRadians(b[1] - a[1]);
