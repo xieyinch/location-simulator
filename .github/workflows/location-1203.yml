@@ -1,0 +1,94 @@
+name: Playback and location integration
+on:
+  push:
+    branches: [main, codex/playback-controls]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mock-location:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Prepare emulator-only ABI
+        run: |
+          printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
+          sed -i 's/abiFilters "arm64-v8a"/abiFilters "arm64-v8a", "x86_64"/' app/build.gradle
+          mkdir -p app/libs/x86_64
+          printf 'void compatibility_stub(void) {}\n' | gcc -nostdlib -shared -fPIC -x c - -o app/libs/x86_64/libcompatibility_test.so
+      - name: Build app and tests
+        run: bash gradlew assembleDebug assembleDebugAndroidTest testDebugUnitTest
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          disable-animations: true
+          script: |
+            adb install -r app/build/outputs/apk/debug/*.apk
+            adb install -r app/build/outputs/apk/androidTest/debug/*.apk
+            adb shell settings put secure location_mode 3
+            adb shell pm grant io.github.xieyinch.locationsimulator android.permission.ACCESS_FINE_LOCATION
+            adb shell pm grant io.github.xieyinch.locationsimulator android.permission.ACCESS_COARSE_LOCATION
+            adb shell pm grant io.github.xieyinch.locationsimulator android.permission.ACCESS_BACKGROUND_LOCATION
+            adb shell appops set io.github.xieyinch.locationsimulator android:mock_location allow
+            adb shell am instrument -w -e class com.zcshou.gogogo.MockLocationInstrumentedTest io.github.xieyinch.locationsimulator.test/androidx.test.runner.AndroidJUnitRunner > instrument-output.txt
+            cat instrument-output.txt
+            grep -Fq 'OK (1 test)' instrument-output.txt
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Improve location playback and controls')
+    needs: mock-location
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      AMAP_ANDROID_KEY: ${{ secrets.AMAP_ANDROID_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Build APK
+        run: |
+          test -n "$AMAP_ANDROID_KEY" || { echo "::error::Missing AMAP_ANDROID_KEY"; exit 1; }
+          printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
+          bash gradlew assembleDebug testDebugUnitTest
+      - name: Verify APK
+        run: |
+          set -eu
+          apk="$(find app/build/outputs/apk/debug -name '*.apk' -type f -print -quit)"
+          test -n "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree "$apk" AndroidManifest.xml > /tmp/manifest.txt
+          grep -Fq -- "$AMAP_ANDROID_KEY" /tmp/manifest.txt
+          rm -f /tmp/manifest.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > /tmp/apk-info.txt
+          grep -F "package: name='io.github.xieyinch.locationsimulator'" /tmp/apk-info.txt
+          unzip -Z1 "$apk" | grep -q 'lib/arm64-v8a/'
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
+          cp "$apk" location-simulator-1.20.3-arm64.apk
+      - name: Publish tested APK
+        run: |
+          cat > release-notes.md <<'NOTES'
+          ## 位置模拟 1.20.3 测试版
+
+          支持路线循环次数和终点返回起点；模拟开始后按钮变为停止，运行时可快速切换选中位置。路线、收藏与摇杆移至地图上方快捷控制。增加可选系统 fused 定位通道。
+
+          已通过 Android 模拟器 GPS 坐标接收测试；实际手机和目标应用仍需验证。包名和签名不变，可尝试覆盖安装并保留本应用设置。高德 Key 从仓库构建配置或原有应用设置读取。
+          NOTES
+          gh release create v1.20.3-beta.1 location-simulator-1.20.3-arm64.apk --target "$GITHUB_SHA" --title "位置模拟 1.20.3 路线与定位优化测试版" --notes-file release-notes.md --prerelease

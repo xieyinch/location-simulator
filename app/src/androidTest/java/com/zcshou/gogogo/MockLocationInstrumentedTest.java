@@ -36,6 +36,10 @@ public class MockLocationInstrumentedTest {
             String status=context.getSharedPreferences(ServiceGo.STATUS_PREFS,Context.MODE_PRIVATE).getString("text","无状态");
             assertNotNull("系统 GPS 未收到目标坐标，服务状态："+status,result);
             assertTrue("系统未将位置标为模拟位置",result.isFromMockProvider());
+            Intent change=new Intent(context,ServiceGo.class).putExtra("points","[{\"lat\":34.24,\"lon\":108.95}]").putExtra("speed",1.2);
+            long changeStart=SystemClock.elapsedRealtime();ContextCompat.startForegroundService(context,change);result=null;
+            while(SystemClock.elapsedRealtime()-changeStart<5000){Location candidate=lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);if(candidate!=null&&Math.abs(candidate.getLatitude()-34.24)<0.0001&&Math.abs(candidate.getLongitude()-108.95)<0.0001){result=candidate;break;}SystemClock.sleep(100);}
+            assertNotNull("运行中切换位置后系统 GPS 未在 5 秒内更新",result);
         }finally{context.stopService(new Intent(context,ServiceGo.class));InstrumentationRegistry.getInstrumentation().runOnMainSync(()->lm.removeUpdates(listener));}
     }
 }
