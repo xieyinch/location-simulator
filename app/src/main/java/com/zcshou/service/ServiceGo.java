@@ -58,7 +58,7 @@ public class ServiceGo extends Service {
     private LocationManager manager;
     private HandlerThread locationThread;
     private Handler worker;
-    private boolean gps,network,fused;
+    private boolean gps,network;
     private volatile boolean running;
     private final java.util.concurrent.atomic.AtomicInteger generation=new java.util.concurrent.atomic.AtomicInteger();
     private volatile boolean failed;
@@ -118,7 +118,6 @@ public class ServiceGo extends Service {
             // Follow ServiceGo 1.12.3: reset and register NETWORK and GPS independently.
             removeProvider(LocationManager.NETWORK_PROVIDER);network=addProvider(LocationManager.NETWORK_PROVIDER);
             removeProvider(LocationManager.GPS_PROVIDER);gps=addProvider(LocationManager.GPS_PROVIDER);
-            fused=addProvider("fused");
         }
         if(!gps&&!network){failed=true;updateStatus("启动失败：系统未允许模拟位置。请在开发者选项中选择本应用，并确认系统定位已开启。",false);stopSelf();return;}
         failed=false;
@@ -131,10 +130,10 @@ public class ServiceGo extends Service {
         final double lat,lon;final float b,velocity;
         synchronized(lock){if(!running)return;long now=SystemClock.elapsedRealtime();double dt=Math.max(0,Math.min(1,(now-lastTick)/1000.0));lastTick=now;
             if(joyStrength>0){double metres=joySpeed*joyStrength*dt;double angle=Math.toRadians(joyAngle);latitude+=metres*Math.sin(angle)/110574.0;double cos=Math.cos(Math.toRadians(latitude));longitude+=metres*Math.cos(angle)/(111320.0*Math.max(0.01,Math.abs(cos)));latitude=Math.max(-90,Math.min(90,latitude));longitude=((longitude+540)%360)-180;bearing=(float)((90-joyAngle+360)%360);velocity=(float)(joySpeed*joyStrength);}
-            else{double distance=(now-routeStarted)/1000.0*speed;double[] p=RouteMath.loopPosition(points,distance,routeLoops,routeLength);if(p[0]!=latitude||p[1]!=longitude){Location old=new Location("old");old.setLatitude(latitude);old.setLongitude(longitude);Location next=new Location("next");next.setLatitude(p[0]);next.setLongitude(p[1]);bearing=(old.bearingTo(next)+360)%360;}latitude=p[0];longitude=p[1];velocity=routeLength>0&&distance<RouteMath.totalDistance(points,routeLength,routeLoops)?(float)speed:0f;}
+            else{double distance=(now-routeStarted)/1000.0*speed;double[] p=RouteMath.loopPosition(points,distance,routeLoops,routeLength);if(p[0]!=latitude||p[1]!=longitude){Location old=new Location("old");old.setLatitude(latitude);old.setLongitude(longitude);Location next=new Location("next");next.setLatitude(p[0]);next.setLongitude(p[1]);bearing=(old.bearingTo(next)+360)%360;}latitude=p[0];longitude=p[1];velocity=routeLength>0?(distance<RouteMath.totalDistance(points,routeLength,routeLoops)?(float)speed:0f):1.2f;}
             lat=latitude;lon=longitude;b=bearing;
         }
-        boolean networkOk=network&&publishNetwork(lat,lon,b,velocity),gpsOk=gps&&publishGps(lat,lon,b,velocity);if(fused)publishFused(lat,lon,b,velocity);
+        boolean networkOk=network&&publishNetwork(lat,lon,b,velocity),gpsOk=gps&&publishGps(lat,lon,b,velocity);
         long recoveryNow=SystemClock.elapsedRealtime();
         gpsFailures=gpsOk?0:gpsFailures+1;networkFailures=networkOk?0:networkFailures+1;
         if(!gpsOk && gpsFailures>=3 && gpsRecoveries<3 && recoveryNow-lastGpsRecovery>=5000){lastGpsRecovery=recoveryNow;gpsRecoveries++;removeProvider(LocationManager.GPS_PROVIDER);gps=addProvider(LocationManager.GPS_PROVIDER);}
@@ -166,7 +165,6 @@ public class ServiceGo extends Service {
     private boolean publishNetwork(double lat,double lon,float b,float velocity){
         try{Location location=new Location(LocationManager.NETWORK_PROVIDER);location.setAccuracy(Criteria.ACCURACY_COARSE);location.setAltitude(altitude);location.setBearing(b);location.setLatitude(lat);location.setLongitude(lon);location.setTime(System.currentTimeMillis());location.setSpeed(velocity);location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());manager.setTestProviderLocation(LocationManager.NETWORK_PROVIDER,location);return true;}catch(Exception e){Log.w("ServiceGo","NETWORK update failed",e);return false;}
     }
-    private void publishFused(double lat,double lon,float b,float velocity){try{Location location=new Location("fused");location.setAccuracy(5f);location.setAltitude(altitude);location.setBearing(b);location.setLatitude(lat);location.setLongitude(lon);location.setTime(System.currentTimeMillis());location.setSpeed(velocity);location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());manager.setTestProviderLocation("fused",location);}catch(Exception e){Log.w("ServiceGo","Optional fused update failed",e);}}
     private void updateStatus(String text,boolean active){getSharedPreferences(STATUS_PREFS,MODE_PRIVATE).edit().putString("text",text).putBoolean("active",active).putLong("time",System.currentTimeMillis()).apply();sendBroadcast(new Intent(ACTION_STATUS).setPackage(getPackageName()).putExtra("text",text));}
     private int dp(int value){return (int)(value*getResources().getDisplayMetrics().density+.5f);}
     private void showControls(){
@@ -185,7 +183,7 @@ public class ServiceGo extends Service {
     }
     private void addSpeed(LinearLayout row,String text,double value,String name){Button button=new Button(this);button.setText(text);button.setTextSize(12);button.setPadding(0,0,0,0);button.setMinWidth(0);button.setOnClickListener(v->{synchronized(lock){joySpeed=value;}speedLabel.setText(name);});row.addView(button,new LinearLayout.LayoutParams(dp(38),dp(38)));}
     private void hideControls(){synchronized(lock){if(joyStrength>0){points.clear();points.add(new double[]{latitude,longitude});routeLength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;}joyStrength=0;}if(controls!=null){try{windowManager.removeView(controls);}catch(Exception ignored){}controls=null;}}
-    @Override public void onDestroy(){generation.incrementAndGet();synchronized(lock){running=false;joyStrength=0;}if(worker!=null)worker.removeCallbacksAndMessages(null);hideControls();if(gps)removeProvider(LocationManager.GPS_PROVIDER);if(network)removeProvider(LocationManager.NETWORK_PROVIDER);if(fused)removeProvider("fused");if(locationThread!=null)locationThread.quitSafely();if(!failed)updateStatus("模拟已停止",false);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    @Override public void onDestroy(){generation.incrementAndGet();synchronized(lock){running=false;joyStrength=0;}if(worker!=null)worker.removeCallbacksAndMessages(null);hideControls();if(gps)removeProvider(LocationManager.GPS_PROVIDER);if(network)removeProvider(LocationManager.NETWORK_PROVIDER);if(locationThread!=null)locationThread.quitSafely();if(!failed)updateStatus("模拟已停止",false);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return binder;}
     public class ServiceGoBinder extends Binder {public void setPosition(double lng,double lat,double alt){try{validate(lat,lng);altitude=alt;ArrayList<double[]> p=new ArrayList<>();p.add(new double[]{lat,lng});worker.post(()->startPosition(p,1.2,1));}catch(Exception e){updateStatus("坐标无效",false);}}}
 }

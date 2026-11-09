@@ -1,0 +1,10 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'io.github.locationsimulator.probe'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'io.github.locationsimulator.probe'
+        minSdk 27
+        targetSdk 32
+    }
+}
