@@ -57,7 +57,9 @@ public class ServiceGo extends Service {
     private LocationManager manager;
     private HandlerThread locationThread;
     private Handler worker;
-    private boolean gps,network,fused,running;
+    private boolean gps,network,fused;
+    private volatile boolean running;
+    private final java.util.concurrent.atomic.AtomicInteger generation=new java.util.concurrent.atomic.AtomicInteger();
     private volatile boolean failed;
     private double latitude,longitude,altitude=55.0,speed=1.2,routeLength;
     private float bearing;
@@ -86,7 +88,7 @@ public class ServiceGo extends Service {
     }
 
     @Override public int onStartCommand(Intent intent,int flags,int startId){
-        if(intent==null||ACTION_STOP.equals(intent.getAction())){stopSelf();return START_NOT_STICKY;}
+        if(intent==null||ACTION_STOP.equals(intent.getAction())){generation.incrementAndGet();stopSelf();return START_NOTICKY;}
         if(ACTION_SHOW_CONTROLS.equals(intent.getAction())){showControls();return START_NOT_STICKY;}
         try{
             ArrayList<double[]> next=new ArrayList<>();String json=intent.getStringExtra("points");
@@ -98,7 +100,7 @@ public class ServiceGo extends Service {
             double nextSpeed=intent.getDoubleExtra("speed",1.2);if(!Double.isFinite(nextSpeed)||nextSpeed<=0||nextSpeed>100)throw new IllegalArgumentException("速度无效");
             int loops=intent.getIntExtra("loops",1);if(loops<1||loops>999)throw new IllegalArgumentException("循环次数无效");
             updateStatus("正在切换模拟位置…",running);
-            worker.postAtFrontOfQueue(()->startPosition(next,nextSpeed,loops));
+            int token=generation.incrementAndGet();worker.postAtFrontOfQueue(()->{if(token==generation.get())startPosition(next,nextSpeed,loops);});
         }catch(Exception e){failed=true;updateStatus("无法启动："+e.getMessage(),false);stopSelf();}
         return START_NOT_STICKY;
     }
@@ -170,7 +172,7 @@ public class ServiceGo extends Service {
     }
     private void addSpeed(LinearLayout row,String text,double value,String name){Button button=new Button(this);button.setText(text);button.setTextSize(12);button.setPadding(0,0,0,0);button.setMinWidth(0);button.setOnClickListener(v->{synchronized(lock){joySpeed=value;}speedLabel.setText(name);});row.addView(button,new LinearLayout.LayoutParams(dp(38),dp(38)));}
     private void hideControls(){synchronized(lock){if(joyStrength>0){points.clear();points.add(new double[]{latitude,longitude});routeLength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;}joyStrength=0;}if(controls!=null){try{windowManager.removeView(controls);}catch(Exception ignored){}controls=null;}}
-    @Override public void onDestroy(){synchronized(lock){running=false;joyStrength=0;}if(worker!=null)worker.removeCallbacksAndMessages(null);hideControls();if(gps)removeProvider(LocationManager.GPS_PROVIDER);if(network)removeProvider(LocationManager.NETWORK_PROVIDER);if(fused)removeProvider("fused");if(locationThread!=null)locationThread.quitSafely();if(!failed)updateStatus("模拟已停止",false);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
+    @Override public void onDestroy(){generation.incrementAndGet();synchronized(lock){running=false;joyStrength=0;}if(worker!=null)worker.removeCallbacksAndMessages(null);hideControls();if(gps)removeProvider(LocationManager.GPS_PROVIDER);if(network)removeProvider(LocationManager.NETWORK_PROVIDER);if(fused)removeProvider("fused");if(locationThread!=null)locationThread.quitSafely();if(!failed)updateStatus("模拟已停止",false);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return binder;}
     public class ServiceGoBinder extends Binder {public void setPosition(double lng,double lat,double alt){try{validate(lat,lng);altitude=alt;ArrayList<double[]> p=new ArrayList<>();p.add(new double[]{lat,lng});worker.post(()->startPosition(p,1.2,1));}catch(Exception e){updateStatus("坐标无效",false);}}}
 }
