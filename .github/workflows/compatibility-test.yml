@@ -39,6 +39,9 @@ jobs:
           s = path.read_text().replace('android:name="com.zcshou.gogogo.FreeSimulationService" android:exported="false"', 'android:name="com.zcshou.gogogo.FreeSimulationService" android:exported="true"')
           path.write_text(s)
           PY
+          # Test-only x86_64 stub: AMap ships ARM libraries; this smoke test never initializes AMap.
+          mkdir -p app/src/main/jniLibs/x86_64
+          printf 'void compatibility_stub(void) {}' | gcc -nostdlib -shared -fPIC -x c - -o app/src/main/jniLibs/x86_64/libcompatibility_test.so
           bash gradlew assembleDebug
           (cd old-version && bash gradlew assembleDebug)
       - uses: reactivecircus/android-emulator-runner@v2
