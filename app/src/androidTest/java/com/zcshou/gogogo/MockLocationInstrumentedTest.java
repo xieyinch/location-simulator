@@ -26,10 +26,11 @@ public class MockLocationInstrumentedTest {
         assertEquals(PackageManager.PERMISSION_GRANTED,ContextCompat.checkSelfPermission(context,Manifest.permission.ACCESS_FINE_LOCATION));
         LocationManager lm=(LocationManager)context.getSystemService(Context.LOCATION_SERVICE);
         LocationListener listener=new LocationListener(){@Override public void onLocationChanged(Location location){} @Override public void onStatusChanged(String p,int s,Bundle e){} @Override public void onProviderEnabled(String p){} @Override public void onProviderDisabled(String p){}};
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(()->lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,0,0,listener,Looper.getMainLooper()));
         Intent intent=new Intent(context,ServiceGo.class).putExtra("points","[{\"lat\":34.23,\"lon\":108.94}]").putExtra("speed",1.2);
         try{
             ContextCompat.startForegroundService(context,intent);
+            SystemClock.sleep(1500);
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(()->lm.requestLocationUpdates(LocationManager.GPS_PROVIDER,0,0,listener,Looper.getMainLooper()));
             long deadline=SystemClock.elapsedRealtime()+15000;Location result=null;
             while(SystemClock.elapsedRealtime()<deadline){Location candidate=lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);if(candidate!=null&&Math.abs(candidate.getLatitude()-34.23)<0.0001&&Math.abs(candidate.getLongitude()-108.94)<0.0001){result=candidate;break;}SystemClock.sleep(250);}
             String status=context.getSharedPreferences(ServiceGo.STATUS_PREFS,Context.MODE_PRIVATE).getString("text","无状态");

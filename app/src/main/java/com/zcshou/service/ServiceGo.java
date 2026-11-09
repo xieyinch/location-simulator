@@ -123,7 +123,7 @@ public class ServiceGo extends Service {
         }
         boolean gpsOk=gps&&publishGps(lat,lon,b,velocity),networkOk=network&&publishNetwork(lat,lon,b,velocity);
         if(!gpsOk&&!networkOk){failedTicks++;if(failedTicks>=3){failed=true;updateStatus("定位发布失败：GPS 和网络通道均未被系统接收。请重新选择模拟位置应用并检查定位开关。",false);stopSelf();return;}}
-        else{failedTicks=0;long now=SystemClock.elapsedRealtime();if(now-lastStatus>=2000){lastStatus=now;updateStatus("系统已接收模拟位置 · GPS "+(gpsOk?"正常":"不可用")+" / 网络 "+(networkOk?"正常":"不可用"),true);}}
+        else{failedTicks=0;long now=SystemClock.elapsedRealtime();if(now-lastStatus>=2000){lastStatus=now;updateStatus("模拟位置已提交 · GPS "+(gpsOk?"正常":"不可用")+" / 网络 "+(networkOk?"正常":"不可用"),true);}}
         worker.postDelayed(this,PERIOD_MS);
     }};
 
