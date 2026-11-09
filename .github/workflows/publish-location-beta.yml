@@ -1,0 +1,56 @@
+name: Publish location simulator beta
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-location-beta.yml
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.event.head_commit.message == 'Publish location simulator 1.20 beta'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare legacy build placeholders
+        run: printf 'MAPS_API_KEY=unused\nMAPS_SAFE_CODE=unused\n' > local.properties
+      - name: Build and test
+        env:
+          AMAP_ANDROID_KEY: ${{ secrets.AMAP_ANDROID_KEY }}
+        run: bash gradlew assembleDebug testDebugUnitTest
+      - name: Verify APK
+        run: |
+          apk="$(find app/build/outputs/apk/debug -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" > apk-info.txt
+          grep -F "package: name='io.github.xieyinch.locationsimulator'" apk-info.txt
+          unzip -Z1 "$apk" > apk-contents.txt
+          grep -q 'lib/arm64-v8a/' apk-contents.txt
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$apk"
+          cp "$apk" location-simulator-1.20.0-beta-arm64.apk
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'EOF'
+          ## 位置模拟 1.20.0 测试版
+
+          基于影梭 1.12.3 的 GPS / NETWORK 模拟定位实现，参考 Lecheeel/Portal 的高德地图、搜索与路线交互。
+
+          - 原生地图页面采用简洁卡片及底部导航；支持普通图和卫星图。
+          - 支持高德地点搜索、位置收藏、逐点／手绘路线、首尾步行路线规划、路线保存与前台服务模拟回放。
+          - 更新入口指向本项目。按手机系统设置选择本应用为模拟位置应用；悬浮方向控制需单独授权。
+          - 使用独立包名 io.github.xieyinch.locationsimulator，可与旧影梭并存；旧应用收藏与路线不会自动跨包迁移。
+          - 高德地图、搜索和步行规划需要绑定本包名及 APK 签名 SHA-1 的高德 Android SDK Key。若仓库未配置 AMAP_ANDROID_KEY，请在 App 内自行填写；没有 Key 时可先手动输入坐标进行模拟。Key、服务权限及配额以高德控制台为准。
+          - 已通过 ARM64 APK 的编译、坐标及路线计算单元测试；另用测试专用 x86 占位库验证了与旧包并存安装及模拟定位服务启动。尚未用有效高德 Key、实际 ARM 手机和目标 App 做端到端验证。
+          - 该构建使用原项目公开签名材料，仅供测试；不建议作为安全敏感场景的正式签名。
+          
+          作品参考 Lecheeel/Portal，原项目及许可说明见仓库 README 和 third_party。
+          EOF
+          gh release create v1.20.0-beta.1 location-simulator-1.20.0-beta-arm64.apk \
+            --target "$GITHUB_SHA" --title "位置模拟 1.20.0 测试版" \
+            --notes-file release-notes.md --prerelease
