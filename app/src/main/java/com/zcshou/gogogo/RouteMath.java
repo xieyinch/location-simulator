@@ -3,7 +3,7 @@ import java.util.List;
 /** WGS-84 interpolation by distance in metres. */
 public final class RouteMath {
     private RouteMath() {}
-    static double[] position(List<double[]> points, double distance) {
+    public static double[] position(List<double[]> points, double distance) {
         if (points.isEmpty()) throw new IllegalArgumentException("empty route");
         double[] current = points.get(0);
         distance = Math.max(0, distance);
@@ -21,7 +21,7 @@ public final class RouteMath {
         }
         return current.clone();
     }
-    static double distance(double[] a, double[] b) {
+    public static double distance(double[] a, double[] b) {
         double lat1 = Math.toRadians(a[0]), lat2 = Math.toRadians(b[0]);
         double dlat = lat2 - lat1, dlon = Math.toRadians(b[1] - a[1]);
         double h = Math.sin(dlat / 2) * Math.sin(dlat / 2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dlon / 2) * Math.sin(dlon / 2);
