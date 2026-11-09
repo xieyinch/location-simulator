@@ -1,6 +1,7 @@
 package com.zcshou.service;
 
 import android.annotation.SuppressLint;
+import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -65,7 +66,8 @@ public class ServiceGo extends Service {
     private float bearing;
     private double joyAngle,joyStrength,joySpeed=1.2;
     private long routeStarted,lastTick,lastStatus;
-    private int failedTicks, routeLoops=1;
+    private int failedTicks, routeLoops=1, gpsFailures, networkFailures, gpsRecoveries, networkRecoveries;
+    private long lastGpsRecovery, lastNetworkRecovery;
     private WindowManager windowManager;
     private WindowManager.LayoutParams windowParams;
     private LinearLayout controls;
@@ -105,7 +107,13 @@ public class ServiceGo extends Service {
         return START_NOT_STICKY;
     }
     private static void validate(double lat,double lon){if(!Double.isFinite(lat)||!Double.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)throw new IllegalArgumentException("坐标无效");}
+    private boolean hasMockAuthorization(){
+        AppOpsManager ops=(AppOpsManager)getSystemService(APP_OPS_SERVICE);
+        return ops!=null && ops.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION,android.os.Process.myUid(),getPackageName())==AppOpsManager.MODE_ALLOWED;
+    }
+    private void stopForAuthorization(){failed=true;updateStatus("模拟位置授权已失效：请在开发者选项重新选择本应用",false);stopSelf();}
     private void startPosition(ArrayList<double[]> next,double nextSpeed,int loops){
+        if(!hasMockAuthorization()){stopForAuthorization();return;}
         if(!gps&&!network){
             // Follow ServiceGo 1.12.3: reset and register NETWORK and GPS independently.
             removeProvider(LocationManager.NETWORK_PROVIDER);network=addProvider(LocationManager.NETWORK_PROVIDER);
@@ -114,20 +122,25 @@ public class ServiceGo extends Service {
         }
         if(!gps&&!network){failed=true;updateStatus("启动失败：系统未允许模拟位置。请在开发者选项中选择本应用，并确认系统定位已开启。",false);stopSelf();return;}
         failed=false;
-        synchronized(lock){points.clear();points.addAll(next);latitude=points.get(0)[0];longitude=points.get(0)[1];speed=nextSpeed;routeLoops=loops;routeLength=0;for(int i=1;i<points.size();i++)routeLength+=RouteMath.distance(points.get(i-1),points.get(i));joyStrength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;failedTicks=0;running=true;}
+        synchronized(lock){points.clear();points.addAll(next);latitude=points.get(0)[0];longitude=points.get(0)[1];speed=nextSpeed;routeLoops=loops;routeLength=0;for(int i=1;i<points.size();i++)routeLength+=RouteMath.distance(points.get(i-1),points.get(i));joyStrength=0;routeStarted=SystemClock.elapsedRealtime();lastTick=routeStarted;failedTicks=0;gpsFailures=networkFailures=0;gpsRecoveries=networkRecoveries=0;lastGpsRecovery=lastNetworkRecovery=0;running=true;}
         worker.removeCallbacks(tick);lastStatus=0;tick.run();
         if(Settings.canDrawOverlays(this))new Handler(getMainLooper()).post(this::showControls);
     }
     private final Runnable tick=new Runnable(){@Override public void run(){
+        if(!hasMockAuthorization()){stopForAuthorization();return;}
         final double lat,lon;final float b,velocity;
         synchronized(lock){if(!running)return;long now=SystemClock.elapsedRealtime();double dt=Math.max(0,Math.min(1,(now-lastTick)/1000.0));lastTick=now;
             if(joyStrength>0){double metres=joySpeed*joyStrength*dt;double angle=Math.toRadians(joyAngle);latitude+=metres*Math.sin(angle)/110574.0;double cos=Math.cos(Math.toRadians(latitude));longitude+=metres*Math.cos(angle)/(111320.0*Math.max(0.01,Math.abs(cos)));latitude=Math.max(-90,Math.min(90,latitude));longitude=((longitude+540)%360)-180;bearing=(float)((90-joyAngle+360)%360);velocity=(float)(joySpeed*joyStrength);}
             else{double distance=(now-routeStarted)/1000.0*speed;double[] p=RouteMath.loopPosition(points,distance,routeLoops,routeLength);if(p[0]!=latitude||p[1]!=longitude){Location old=new Location("old");old.setLatitude(latitude);old.setLongitude(longitude);Location next=new Location("next");next.setLatitude(p[0]);next.setLongitude(p[1]);bearing=(old.bearingTo(next)+360)%360;}latitude=p[0];longitude=p[1];velocity=routeLength>0&&distance<RouteMath.totalDistance(points,routeLength,routeLoops)?(float)speed:0f;}
             lat=latitude;lon=longitude;b=bearing;
         }
-        boolean gpsOk=gps&&publishGps(lat,lon,b,velocity),networkOk=network&&publishNetwork(lat,lon,b,velocity);if(fused)publishFused(lat,lon,b,velocity);
-        if(!gpsOk&&!networkOk){failedTicks++;if(failedTicks>=3){failed=true;updateStatus("定位发布失败：GPS 和网络通道均未被系统接收。请重新选择模拟位置应用并检查定位开关。",false);stopSelf();return;}}
-        else{failedTicks=0;long now=SystemClock.elapsedRealtime();if(now-lastStatus>=2000){lastStatus=now;updateStatus("模拟位置已提交 · GPS "+(gpsOk?"正常":"不可用")+" / 网络 "+(networkOk?"正常":"不可用"),true);}}
+        boolean networkOk=network&&publishNetwork(lat,lon,b,velocity),gpsOk=gps&&publishGps(lat,lon,b,velocity);if(fused)publishFused(lat,lon,b,velocity);
+        long recoveryNow=SystemClock.elapsedRealtime();
+        gpsFailures=gpsOk?0:gpsFailures+1;networkFailures=networkOk?0:networkFailures+1;
+        if(!gpsOk && gpsFailures>=3 && gpsRecoveries<3 && recoveryNow-lastGpsRecovery>=5000){lastGpsRecovery=recoveryNow;gpsRecoveries++;removeProvider(LocationManager.GPS_PROVIDER);gps=addProvider(LocationManager.GPS_PROVIDER);}
+        if(!networkOk && networkFailures>=3 && networkRecoveries<3 && recoveryNow-lastNetworkRecovery>=5000){lastNetworkRecovery=recoveryNow;networkRecoveries++;removeProvider(LocationManager.NETWORK_PROVIDER);network=addProvider(LocationManager.NETWORK_PROVIDER);}
+        if(!gpsOk&&!networkOk){failedTicks++;if(failedTicks>=30){failed=true;updateStatus("定位发布失败：GPS 和网络定位通道均调用失败。请检查模拟位置授权和定位开关。",false);stopSelf();return;}}
+        else{failedTicks=0;long now=SystemClock.elapsedRealtime();if(now-lastStatus>=2000){lastStatus=now;updateStatus("模拟位置已提交 · GPS "+(gpsOk?"已提交":"不可用")+" / 网络 "+(networkOk?"已提交":"不可用"),true);}}
         worker.postDelayed(this,PERIOD_MS);
     }};
 
