@@ -42,7 +42,12 @@ adb('shell','am','start','-W','-n','io.github.xieyinch.locationsimulator/com.zcs
 root=tree()
 for label in ('路线','收藏','摇杆','设置'):
     find(root, **{'content-desc':label})
-find(root, **{'content-desc':'搜索地点或地址'})
+search=find(root, **{'content-desc':'搜索地点或地址'})
+assert search.attrib.get('class')=='android.widget.EditText', search.attrib
+tap(search);adb('shell','input','text','test')
+root=tree();find(root,text='test');find(root,**{'content-desc':'执行地点搜索'})
+adb('shell','input','keyevent','4')
+root=tree()
 find(root, text='开始模拟')
 capture('DESIGN_HOME')
 tap(find(root, **{'content-desc':'路线'}))

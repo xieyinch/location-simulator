@@ -169,7 +169,7 @@ public class ServiceGo extends Service {
     }
     private void removeProvider(String provider){try{manager.removeTestProvider(provider);}catch(Exception ignored){}}
     private void startProviderListeners(){
-        keepAlive=new LocationListener(){@Override public void onLocationChanged(Location ignored){}};
+        keepAlive=new LocationListener(){@Override public void onLocationChanged(Location ignored){} @Override public void onStatusChanged(String provider,int status,Bundle extras){} @Override public void onProviderEnabled(String provider){} @Override public void onProviderDisabled(String provider){}};
         for(String provider:new String[]{LocationManager.GPS_PROVIDER,LocationManager.NETWORK_PROVIDER}){
             try{manager.requestLocationUpdates(provider,1000,0f,keepAlive,locationThread.getLooper());}
             catch(SecurityException|IllegalArgumentException e){Log.w("ServiceGo","Cannot subscribe to "+provider,e);}
